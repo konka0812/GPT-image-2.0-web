@@ -1,5 +1,5 @@
 <template>
-  <div class="grid h-full min-h-0 gap-6 lg:grid-cols-[420px_1fr]">
+  <div class="grid h-full min-h-0 gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
     <section class="card flex min-h-0 flex-col rounded-3xl p-6">
       <h1 class="text-2xl font-black">AI 生图</h1>
       <p class="mt-2 text-sm text-slate-400">输入提示词生成图片</p>

@@ -1,5 +1,5 @@
 <template>
-  <div class="grid min-h-full gap-6 overflow-y-auto lg:h-full lg:min-h-0 lg:grid-cols-[420px_1fr] lg:overflow-hidden">
+  <div class="grid min-h-full gap-6 overflow-y-auto lg:h-full lg:min-h-0 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:overflow-hidden">
     <section class="card flex flex-col rounded-3xl p-6 lg:min-h-0">
       <div class="flex shrink-0 items-start justify-between gap-3">
         <div>
