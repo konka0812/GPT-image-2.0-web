@@ -7,7 +7,8 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { viewDb, withDb } from './db.js'
 import { requireAuth, signToken } from './auth.js'
-import { assertEnum, callImageApiWithRetry, formats, qualities, saveBase64Image, sizes } from './utils.js'
+import { defaultModel, normalizeModel, requireModel } from './settings.js'
+import { assertEnum, callImageApiWithRetry, formats, qualities, saveImage, sizes } from './utils.js'
 
 const batchConcurrency = 1
 const defaultBaseUrl = 'https://testvideo.site/v1'
@@ -56,17 +57,25 @@ app.post('/api/auth/login', async (req, res) => {
 
 app.get('/api/settings', requireAuth, async (req, res) => {
   const row = await viewDb((data) => data.settings.find((s) => s.user_id === req.user.id))
-  res.json(row ? { base_url: row.base_url, api_key: row.api_key } : { base_url: defaultBaseUrl, api_key: '' })
+  res.json(row
+    ? { base_url: row.base_url, api_key: row.api_key, model: normalizeModel(row.model) }
+    : { base_url: defaultBaseUrl, api_key: '', model: defaultModel })
 })
 
 app.post('/api/settings', requireAuth, async (req, res) => {
   const baseUrl = String(req.body.base_url || defaultBaseUrl).trim()
   const apiKey = String(req.body.api_key || '').trim()
+  let model
+  try {
+    model = requireModel(req.body.model)
+  } catch (error) {
+    return res.status(400).json({ error: error.message })
+  }
   if (!apiKey) return res.status(400).json({ error: '请填写 API Key' })
   await withDb((data) => {
     const old = data.settings.find((s) => s.user_id === req.user.id)
-    if (old) Object.assign(old, { base_url: baseUrl, api_key: apiKey, updated_at: new Date().toISOString() })
-    else data.settings.push({ user_id: req.user.id, base_url: baseUrl, api_key: apiKey, updated_at: new Date().toISOString() })
+    if (old) Object.assign(old, { base_url: baseUrl, api_key: apiKey, model, updated_at: new Date().toISOString() })
+    else data.settings.push({ user_id: req.user.id, base_url: baseUrl, api_key: apiKey, model, updated_at: new Date().toISOString() })
   })
   res.json({ ok: true })
 })
@@ -74,7 +83,7 @@ app.post('/api/settings', requireAuth, async (req, res) => {
 async function getSettings(userId) {
   const row = await viewDb((data) => data.settings.find((s) => s.user_id === userId))
   if (!row?.api_key) throw new Error('请先在设置页填写 API Key')
-  return { ...row, base_url: row.base_url || defaultBaseUrl }
+  return { ...row, base_url: row.base_url || defaultBaseUrl, model: normalizeModel(row.model) }
 }
 
 async function callWithFallback(settings, endpoint, payload, onStatus = () => {}) {
@@ -102,9 +111,9 @@ app.post('/api/images/generate', requireAuth, async (req, res) => {
       data.generations.push(record)
       return record.id
     })
-    const data = await callWithFallback(settings, '/images/generations', { model: 'gpt-image-2', prompt, size, quality, output_format: outputFormat, n })
+    const data = await callWithFallback(settings, '/images/generations', { model: settings.model, prompt, size, quality, output_format: outputFormat, n })
     const images = []
-    for (const item of data.data || []) images.push(await saveBase64Image(item.b64_json, outputFormat))
+    for (const item of data.data || []) images.push(await saveImage(item, outputFormat))
     await withDb((data) => Object.assign(data.generations.find((r) => r.id === recordId), { image_path: JSON.stringify(images), status: 'success' }))
     res.json({ images })
   } catch (error) {
@@ -129,13 +138,19 @@ app.post('/api/images/edit', requireAuth, upload.single('file'), async (req, res
       data.edits.push(record)
       return record.id
     })
-    const data = await callWithFallback(settings, '/images/edits', { model: 'gpt-image-2', prompt, images: [{ image_url: imageUrl }], size, quality })
+    const result = await callWithFallback(settings, '/images/edits', { model: settings.model, prompt, images: [{ image_url: imageUrl }], size, quality })
     const images = []
-    for (const item of data.data || []) images.push(await saveBase64Image(item.b64_json, outputFormat))
-    await withDb((data) => Object.assign(data.edits.find((r) => r.id === recordId), { image_path: JSON.stringify(images), status: 'success' }))
+    for (const item of result.data || []) images.push(await saveImage(item, outputFormat))
+    await withDb((data) => {
+      const record = data.edits.find((r) => r.id === recordId)
+      if (record) Object.assign(record, { image_path: JSON.stringify(images), status: 'success' })
+    })
     res.json({ images })
   } catch (error) {
-    if (recordId) await withDb((data) => Object.assign(data.edits.find((r) => r.id === recordId), { status: 'failed', error: error.message }))
+    if (recordId) await withDb((data) => {
+      const record = data.edits.find((r) => r.id === recordId)
+      if (record) Object.assign(record, { status: 'failed', error: error.message })
+    })
     res.status(500).json({ error: error.message })
   }
 })
@@ -160,13 +175,19 @@ app.post('/api/images/transform', requireAuth, upload.fields([{ name: 'fileA', m
       data.edits.push(record)
       return record.id
     })
-    const data = await callWithFallback(settings, '/images/edits', { model: 'gpt-image-2', prompt, images: [{ image_url: imageUrlA }, { image_url: imageUrlB }], size, quality })
+    const result = await callWithFallback(settings, '/images/edits', { model: settings.model, prompt, images: [{ image_url: imageUrlA }, { image_url: imageUrlB }], size, quality })
     const images = []
-    for (const item of data.data || []) images.push(await saveBase64Image(item.b64_json, outputFormat))
-    await withDb((data) => Object.assign(data.edits.find((r) => r.id === recordId), { image_path: JSON.stringify(images), status: 'success' }))
+    for (const item of result.data || []) images.push(await saveImage(item, outputFormat))
+    await withDb((data) => {
+      const record = data.edits.find((r) => r.id === recordId)
+      if (record) Object.assign(record, { image_path: JSON.stringify(images), status: 'success' })
+    })
     res.json({ images })
   } catch (error) {
-    if (recordId) await withDb((data) => Object.assign(data.edits.find((r) => r.id === recordId), { status: 'failed', error: error.message }))
+    if (recordId) await withDb((data) => {
+      const record = data.edits.find((r) => r.id === recordId)
+      if (record) Object.assign(record, { status: 'failed', error: error.message })
+    })
     res.status(500).json({ error: error.message })
   }
 })
@@ -210,13 +231,13 @@ app.post('/api/images/edit/batch', requireAuth, upload.array('files', 20), async
             data.edits.push(record)
             return record.id
           })
-          const data = await callWithFallback(settings, '/images/edits', { model: 'gpt-image-2', prompt, images: [{ image_url: imageUrl }], size, quality }, (status) => {
+          const data = await callWithFallback(settings, '/images/edits', { model: settings.model, prompt, images: [{ image_url: imageUrl }], size, quality }, (status) => {
             if (status.type === 'attempt') job.results[index].progressText = `调用 ${status.baseUrl}，第 ${status.attempt}/${status.max} 次`
             if (status.type === 'retry') job.results[index].progressText = `${status.baseUrl} 超时/失败，8秒后重试第 ${status.nextAttempt}/${status.max} 次`
             if (status.type === 'fallback') job.results[index].progressText = `主线路失败，切换备用线路 ${status.to}`
           })
           const images = []
-          for (const item of data.data || []) images.push(await saveBase64Image(item.b64_json, outputFormat))
+          for (const item of data.data || []) images.push(await saveImage(item, outputFormat))
           await withDb((data) => Object.assign(data.edits.find((r) => r.id === recordId), { image_path: JSON.stringify(images), status: 'success' }))
           job.results[index] = { index, name: file.originalname, status: 'success', progressText: '处理成功', images }
         } catch (error) {

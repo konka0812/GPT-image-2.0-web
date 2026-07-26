@@ -3,6 +3,7 @@
     <h1 class="text-2xl font-black">设置</h1>
     <p class="mt-2 text-sm text-slate-400">每个用户单独保存自己的 API 配置</p>
     <div class="mt-6 space-y-4">
+      <input v-model="form.model" class="field" placeholder="模型名称，例如 gpt-image-2" />
       <input v-model="form.base_url" class="field" placeholder="Base URL" />
       <p class="text-xs text-slate-500">默认优先使用 https://testvideo.site/v1，失败自动切换 https://hk.testvideo.site/v1</p>
       <input v-model="form.api_key" class="field" type="password" placeholder="API Key" />
@@ -17,7 +18,7 @@
 import axios from 'axios'
 import { onMounted, ref } from 'vue'
 
-const form = ref({ base_url: 'https://testvideo.site/v1', api_key: '' })
+const form = ref({ model: 'gpt-image-2', base_url: 'https://testvideo.site/v1', api_key: '' })
 const loading = ref(false)
 const message = ref('')
 const error = ref('')

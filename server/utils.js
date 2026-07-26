@@ -19,13 +19,64 @@ export async function saveBase64Image(b64, format = 'png') {
   return `/uploads/${name}`
 }
 
+export async function saveImage(item, format = 'png') {
+  if (item.b64_json) {
+    return saveBase64Image(item.b64_json, format)
+  }
+  if (item.url) {
+    const safeFormat = assertEnum(format, formats, 'png')
+    const dir = process.env.UPLOAD_DIR || 'uploads'
+    await fs.mkdir(dir, { recursive: true })
+    const name = `${Date.now()}-${Math.random().toString(16).slice(2)}.${safeFormat}`
+    const file = path.join(dir, name)
+    const response = await fetch(item.url)
+    if (!response.ok) throw new Error(`下载图片失败: HTTP ${response.status}`)
+    const buffer = Buffer.from(await response.arrayBuffer())
+    await fs.writeFile(file, buffer)
+    return `/uploads/${name}`
+  }
+  throw new Error('上游返回的图片数据格式未知')
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 function isRetryable(error) {
   const message = error?.message || ''
+  if (message.includes('上游任务')) return false
   return message.includes('超时') || message.includes('暂时不可用') || message.includes('timeout') || message.includes('HTTP 502') || message.includes('HTTP 524')
+}
+
+export function resolvePollUrl(baseUrl, pollUrl) {
+  return new URL(pollUrl, `${new URL(baseUrl).origin}/`).toString()
+}
+
+async function pollAsyncTask({ baseUrl, apiKey, pollUrl, pollAfterMs = 3000 }) {
+  const url = resolvePollUrl(baseUrl, pollUrl)
+  const maxWaitMs = 300000
+  const intervalMs = Math.max(1000, Math.min(pollAfterMs || 3000, 10000))
+  const start = Date.now()
+  while (Date.now() - start < maxWaitMs) {
+    await sleep(intervalMs)
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(60000)
+    })
+    const text = await response.text()
+    let data
+    try { data = JSON.parse(text) } catch { data = { error: text } }
+    if (!response.ok) {
+      const message = data?.error?.message || data?.message || `HTTP ${response.status}`
+      throw new Error(typeof message === 'string' ? message.slice(0, 300) : JSON.stringify(message))
+    }
+    const status = data?.status
+    if (status === 'succeeded' || status === 'completed' || status === 'success') return data
+    if (status === 'failed' || status === 'error' || status === 'rejected') {
+      throw new Error(data?.message || data?.error?.message || '上游任务失败')
+    }
+  }
+  throw new Error('上游任务处理超时，请降低质量/尺寸后重试')
 }
 
 export async function callImageApi({ baseUrl, apiKey, endpoint, payload }) {
@@ -41,6 +92,9 @@ export async function callImageApi({ baseUrl, apiKey, endpoint, payload }) {
   const text = await response.text()
   let data
   try { data = JSON.parse(text) } catch { data = { error: text } }
+  if (response.status === 202 && data?.poll_url) {
+    return pollAsyncTask({ baseUrl, apiKey, pollUrl: data.poll_url, pollAfterMs: data.poll_after_ms })
+  }
   if (!response.ok) {
     if (response.status === 524 || text.includes('Error code 524') || text.includes('A timeout occurred')) {
       throw new Error('上游接口处理超时，请降低质量/尺寸后重试，或稍后再试')
