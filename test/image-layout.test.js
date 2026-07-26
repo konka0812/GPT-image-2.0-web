@@ -20,3 +20,11 @@ for (const page of fixedPages) {
     assert.doesNotMatch(source, /lg:grid-cols-\[minmax\(0,3fr\)_minmax\(0,2fr\)\]/)
   })
 }
+
+test('ReferenceGenerate.vue uses compact horizontal reference previews', async () => {
+  const source = await fs.readFile(new URL('../src/views/ReferenceGenerate.vue', import.meta.url), 'utf8')
+  assert.match(source, /overflow-x-auto/)
+  assert.match(source, /class="flex gap-3"/)
+  assert.match(source, /w-28 shrink-0/)
+  assert.doesNotMatch(source, /class="grid grid-cols-2 gap-3"/)
+})
