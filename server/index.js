@@ -155,43 +155,6 @@ app.post('/api/images/edit', requireAuth, upload.single('file'), async (req, res
   }
 })
 
-app.post('/api/images/transform', requireAuth, upload.fields([{ name: 'fileA', maxCount: 1 }, { name: 'fileB', maxCount: 1 }]), async (req, res) => {
-  const prompt = String(req.body.prompt || '').trim()
-  const size = assertEnum(req.body.size, sizes, '1024x1024')
-  const quality = assertEnum(req.body.quality, qualities, 'low')
-  const outputFormat = assertEnum(req.body.output_format, formats, 'png')
-  const fileA = req.files?.fileA?.[0]
-  const fileB = req.files?.fileB?.[0]
-  if (!fileA) return res.status(400).json({ error: '请上传A图（内容参考）' })
-  if (!fileB) return res.status(400).json({ error: '请上传B图（模板/风格参考）' })
-  if (!prompt) return res.status(400).json({ error: '请输入提示词' })
-  const imageUrlA = `data:${fileA.mimetype};base64,${fileA.buffer.toString('base64')}`
-  const imageUrlB = `data:${fileB.mimetype};base64,${fileB.buffer.toString('base64')}`
-  let recordId
-  try {
-    const settings = await getSettings(req.user.id)
-    recordId = await withDb((data) => {
-      const record = { id: data.seq.edits++, user_id: req.user.id, prompt, size, quality, output_format: outputFormat, source_image: `A:${fileA.originalname} B:${fileB.originalname}`, image_path: '', status: 'running', error: '', created_at: new Date().toISOString(), type: 'transform' }
-      data.edits.push(record)
-      return record.id
-    })
-    const result = await callWithFallback(settings, '/images/edits', { model: settings.model, prompt, images: [{ image_url: imageUrlA }, { image_url: imageUrlB }], size, quality })
-    const images = []
-    for (const item of result.data || []) images.push(await saveImage(item, outputFormat))
-    await withDb((data) => {
-      const record = data.edits.find((r) => r.id === recordId)
-      if (record) Object.assign(record, { image_path: JSON.stringify(images), status: 'success' })
-    })
-    res.json({ images })
-  } catch (error) {
-    if (recordId) await withDb((data) => {
-      const record = data.edits.find((r) => r.id === recordId)
-      if (record) Object.assign(record, { status: 'failed', error: error.message })
-    })
-    res.status(500).json({ error: error.message })
-  }
-})
-
 app.post('/api/images/edit/batch', requireAuth, upload.array('files', 20), async (req, res) => {
   const prompt = String(req.body.prompt || '').trim()
   const size = assertEnum(req.body.size, sizes, '1024x1024')

@@ -145,7 +145,6 @@ pm2 start ecosystem.config.cjs
 | `/api/images/generate` | POST | AI 生图 |
 | `/api/images/edit` | POST | 单图编辑 |
 | `/api/images/edit/batch` | POST | 批量编辑 |
-| `/api/images/transform` | POST | 内容转换 |
 | `/api/history` | GET/DELETE | 历史记录 |
 
 ## 支持的图片尺寸
