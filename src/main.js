@@ -6,6 +6,7 @@ import App from './App.vue'
 import Login from './views/Login.vue'
 import Generate from './views/Generate.vue'
 import EditImage from './views/EditImage.vue'
+import ReferenceGenerate from './views/ReferenceGenerate.vue'
 import BatchEdit from './views/BatchEdit.vue'
 import History from './views/History.vue'
 import Settings from './views/Settings.vue'
@@ -24,6 +25,7 @@ const router = createRouter({
     { path: '/login', component: Login },
     { path: '/generate', component: Generate },
     { path: '/edit', component: EditImage },
+    { path: '/reference', component: ReferenceGenerate },
     { path: '/batch-edit', component: BatchEdit },
     { path: '/history', component: History },
     { path: '/settings', component: Settings }

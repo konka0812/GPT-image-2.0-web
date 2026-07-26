@@ -7,6 +7,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { viewDb, withDb } from './db.js'
 import { requireAuth, signToken } from './auth.js'
+import { buildReferencePayload, maxReferenceImageBytes, validateReferenceFiles } from './reference.js'
 import { defaultModel, normalizeModel, requireModel } from './settings.js'
 import { assertEnum, callImageApiWithRetry, formats, qualities, saveImage, sizes } from './utils.js'
 
@@ -23,8 +24,19 @@ dotenv.config()
 
 const app = express()
 const upload = multer({ limits: { fileSize: 30 * 1024 * 1024 } })
+const referenceUpload = multer({ limits: { fileSize: maxReferenceImageBytes, files: 16 } })
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const rootDir = path.resolve(__dirname, '..')
+
+function uploadReferenceImages(req, res, next) {
+  referenceUpload.array('files', 16)(req, res, (error) => {
+    if (error?.code === 'LIMIT_UNEXPECTED_FILE') return res.status(400).json({ error: '最多上传 16 张参考图' })
+    if (error?.code === 'LIMIT_FILE_COUNT') return res.status(400).json({ error: '最多上传 16 张参考图' })
+    if (error?.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ error: '每张参考图不能超过 4MB' })
+    if (error) return next(error)
+    next()
+  })
+}
 
 app.use(cors())
 app.use(express.json({ limit: '60mb' }))
@@ -149,6 +161,45 @@ app.post('/api/images/edit', requireAuth, upload.single('file'), async (req, res
   } catch (error) {
     if (recordId) await withDb((data) => {
       const record = data.edits.find((r) => r.id === recordId)
+      if (record) Object.assign(record, { status: 'failed', error: error.message })
+    })
+    res.status(500).json({ error: error.message })
+  }
+})
+
+app.post('/api/images/reference', requireAuth, uploadReferenceImages, async (req, res) => {
+  const prompt = String(req.body.prompt || '').trim()
+  const size = assertEnum(req.body.size, sizes, '1024x1024')
+  const quality = assertEnum(req.body.quality, qualities, 'low')
+  const outputFormat = assertEnum(req.body.output_format, formats, 'png')
+  const files = req.files || []
+  if (!prompt) return res.status(400).json({ error: '请输入提示词' })
+  try {
+    validateReferenceFiles(files)
+  } catch (error) {
+    return res.status(400).json({ error: error.message })
+  }
+  let recordId
+  try {
+    const settings = await getSettings(req.user.id)
+    const payload = buildReferencePayload({ files, model: settings.model, prompt, size, quality, outputFormat })
+    recordId = await withDb((data) => {
+      const record = { id: data.seq.edits++, user_id: req.user.id, prompt, size, quality, output_format: outputFormat, source_image: JSON.stringify(files.map((file) => file.originalname)), image_path: '', status: 'running', error: '', created_at: new Date().toISOString(), type: 'reference' }
+      data.edits.push(record)
+      return record.id
+    })
+    const result = await callWithFallback(settings, '/images/edits', payload)
+    const item = result.data?.[0]
+    if (!item) throw new Error('上游未返回生成图片')
+    const images = [await saveImage(item, outputFormat)]
+    await withDb((data) => {
+      const record = data.edits.find((entry) => entry.id === recordId)
+      if (record) Object.assign(record, { image_path: JSON.stringify(images), status: 'success' })
+    })
+    res.json({ images })
+  } catch (error) {
+    if (recordId) await withDb((data) => {
+      const record = data.edits.find((entry) => entry.id === recordId)
       if (record) Object.assign(record, { status: 'failed', error: error.message })
     })
     res.status(500).json({ error: error.message })

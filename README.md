@@ -1,6 +1,6 @@
 # GPT-Image 2.0 Web
 
-基于 GPT-Image-2 的 AI 图像生成与编辑 Web 应用，支持用户认证、单图/批量编辑、内容转换等功能。
+基于 GPT-Image-2 的 AI 图像生成与编辑 Web 应用，支持用户认证、单图/批量编辑和多参考图生成等功能。
 
 ## 兼容 OpenAI 格式
 
@@ -31,8 +31,8 @@
 - **用户系统** - 注册/登录，JWT 认证
 - **AI 生图** - 文字生成图片，支持多种尺寸和画质
 - **AI 改图** - 单张图片编辑，支持提示词控制
+- **参考图生成** - 上传 1-16 张有序参考图，通过 Image 1、Image 2 等编号在提示词中指定用途，固定生成一张新图
 - **批量改图** - 多张图片批量处理，进度追踪，ZIP 打包下载
-- **内容转换** - 参考 A 图内容 + B 图模板风格，智能转换生成
 - **历史记录** - 用户独立的生成/编辑历史，一键清理
 - **个性化设置** - 每用户独立 API Key 和 Base URL 配置
 - **自动重试** - 上游超时/失败自动重试，支持备用线路切换
@@ -118,8 +118,8 @@ pm2 start ecosystem.config.cjs
 │   │   ├── Login.vue       # 登录/注册
 │   │   ├── Generate.vue    # AI 生图
 │   │   ├── EditImage.vue   # 单图编辑
+│   │   ├── ReferenceGenerate.vue # 多参考图生成
 │   │   ├── BatchEdit.vue   # 批量编辑
-│   │   ├── ContentTransform.vue  # 内容转换
 │   │   ├── History.vue     # 历史记录
 │   │   └── Settings.vue    # 设置页
 │   ├── components/         # 公共组件
@@ -144,6 +144,7 @@ pm2 start ecosystem.config.cjs
 | `/api/settings` | GET/POST | 获取/设置 API 配置 |
 | `/api/images/generate` | POST | AI 生图 |
 | `/api/images/edit` | POST | 单图编辑 |
+| `/api/images/reference` | POST | 1-16 张有序参考图生成一张新图 |
 | `/api/images/edit/batch` | POST | 批量编辑 |
 | `/api/history` | GET/DELETE | 历史记录 |
 

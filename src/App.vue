@@ -21,6 +21,7 @@ const router = useRouter()
 const items = [
   { path: '/generate', label: '生图' },
   { path: '/edit', label: '改图' },
+  { path: '/reference', label: '参考图生成' },
   { path: '/batch-edit', label: '批量改图' },
   { path: '/history', label: '历史' },
   { path: '/settings', label: '设置' }
