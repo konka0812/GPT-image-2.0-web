@@ -52,6 +52,10 @@ export function resolvePollUrl(baseUrl, pollUrl) {
   return new URL(pollUrl, `${new URL(baseUrl).origin}/`).toString()
 }
 
+export function isCompletedImageTask(data) {
+  return Array.isArray(data?.data) && data.data.some((item) => item?.b64_json || item?.url)
+}
+
 async function pollAsyncTask({ baseUrl, apiKey, pollUrl, pollAfterMs = 3000 }) {
   const url = resolvePollUrl(baseUrl, pollUrl)
   const maxWaitMs = 300000
@@ -71,7 +75,7 @@ async function pollAsyncTask({ baseUrl, apiKey, pollUrl, pollAfterMs = 3000 }) {
       throw new Error(typeof message === 'string' ? message.slice(0, 300) : JSON.stringify(message))
     }
     const status = data?.status
-    if (status === 'succeeded' || status === 'completed' || status === 'success') return data
+    if (isCompletedImageTask(data) || status === 'succeeded' || status === 'completed' || status === 'success') return data
     if (status === 'failed' || status === 'error' || status === 'rejected') {
       throw new Error(data?.message || data?.error?.message || '上游任务失败')
     }
