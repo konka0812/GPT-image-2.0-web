@@ -61,7 +61,7 @@
       <div v-if="loading" class="flex min-h-0 flex-1 items-center justify-center rounded-3xl border border-dashed border-white/15 p-6"><TaskStatus :job="job" :elapsed="elapsed" title="正在根据参考图生成" /></div>
       <div v-else-if="!images.length" class="flex min-h-0 flex-1 items-center justify-center rounded-3xl border border-dashed border-white/15 text-slate-400">结果会显示在这里</div>
       <div v-else class="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
-        <img :src="images[0]" class="h-full w-full min-h-0 flex-1 object-contain" />
+        <img :src="images[0]" class="min-h-0 flex-1 rounded-3xl object-contain" />
         <a :href="images[0]" download class="btn block shrink-0 border border-white/10 text-center text-cyan-200">下载图片</a>
       </div>
     </section>

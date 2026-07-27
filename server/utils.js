@@ -56,10 +56,10 @@ export function isCompletedImageTask(data) {
   return Array.isArray(data?.data) && data.data.some((item) => item?.b64_json || item?.url)
 }
 
-async function pollAsyncTask({ baseUrl, apiKey, pollUrl, pollAfterMs = 8000, onStatus = () => {} }) {
+async function pollAsyncTask({ baseUrl, apiKey, pollUrl, pollAfterMs = 3000, onStatus = () => {} }) {
   const url = resolvePollUrl(baseUrl, pollUrl)
   const maxWaitMs = 300000
-  const intervalMs = Math.max(8000, Math.min(pollAfterMs || 8000, 10000))
+  const intervalMs = Math.max(1000, Math.min(pollAfterMs || 3000, 10000))
   const start = Date.now()
   let pollCount = 0
   while (Date.now() - start < maxWaitMs) {
