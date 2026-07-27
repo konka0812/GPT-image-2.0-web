@@ -13,8 +13,7 @@ import { defaultModel, normalizeModel, requireModel } from './settings.js'
 import { assertEnum, callImageApiWithRetry, formats, qualities, saveImage, sizes } from './utils.js'
 
 const batchConcurrency = 1
-const defaultBaseUrl = 'https://testvideo.site/v1'
-const fallbackBaseUrl = process.env.FALLBACK_BASE_URL || 'https://hk.testvideo.site/v1'
+const defaultBaseUrl = 'https://api.example.com/v1'
 const batchJobs = new Map()
 
 function chunkError(error) {
@@ -105,16 +104,6 @@ async function getSettings(userId) {
   return { ...row, base_url: row.base_url || defaultBaseUrl, model: normalizeModel(row.model) }
 }
 
-async function callWithFallback(settings, endpoint, payload, onStatus = () => {}) {
-  try {
-    return await callImageApiWithRetry({ baseUrl: settings.base_url || defaultBaseUrl, apiKey: settings.api_key, endpoint, payload }, 2, onStatus)
-  } catch (error) {
-    if ((settings.base_url || defaultBaseUrl) === fallbackBaseUrl) throw error
-    onStatus({ type: 'fallback', from: settings.base_url || defaultBaseUrl, to: fallbackBaseUrl, error: error.message })
-    return await callImageApiWithRetry({ baseUrl: fallbackBaseUrl, apiKey: settings.api_key, endpoint, payload }, 2, onStatus)
-  }
-}
-
 function historyRecord(data, kind, recordId) {
   const records = kind === 'generate' ? data.generations : data.edits
   return records.find((record) => record.id === recordId)
@@ -131,7 +120,6 @@ function reportJobStatus(job, status) {
   let fields = {}
   if (status.type === 'attempt') fields = { phase: 'calling', progressText: `正在调用 ${status.baseUrl}，第 ${status.attempt}/${status.max} 次`, attempt: status.attempt, maxAttempts: status.max, baseUrl: status.baseUrl }
   if (status.type === 'retry') fields = { phase: 'retry', progressText: `调用失败，等待后进行第 ${status.nextAttempt}/${status.max} 次尝试`, attempt: status.attempt, maxAttempts: status.max, baseUrl: status.baseUrl }
-  if (status.type === 'fallback') fields = { phase: 'fallback', progressText: `主线路失败，切换备用线路 ${status.to}`, baseUrl: status.to }
   if (status.type === 'accepted') fields = { phase: 'accepted', progressText: '上游已接受任务，等待处理', baseUrl: status.baseUrl }
   if (status.type === 'poll') fields = { phase: 'polling', progressText: `正在第 ${status.pollCount} 次查询上游任务`, pollCount: status.pollCount, baseUrl: status.baseUrl }
   if (status.type === 'poll-result') fields = { phase: 'polling', progressText: `第 ${status.pollCount} 次查询：${status.status}`, pollCount: status.pollCount, baseUrl: status.baseUrl }
@@ -142,7 +130,7 @@ function reportJobStatus(job, status) {
 
 async function finishImageJob(job, settings, endpoint, payload, outputFormat, maxImages = Infinity) {
   try {
-    const result = await callWithFallback(settings, endpoint, payload, (status) => reportJobStatus(job, status))
+    const result = await callImageApiWithRetry({ baseUrl: settings.base_url || defaultBaseUrl, apiKey: settings.api_key, endpoint, payload }, 2, (status) => reportJobStatus(job, status))
     updateJob(job.id, { phase: 'saving', progressText: '上游处理完成，正在保存图片' })
     await updateJobHistory(job, { phase: 'saving', progress_text: '上游处理完成，正在保存图片' }).catch(() => {})
     const images = []
@@ -290,10 +278,9 @@ app.post('/api/images/edit/batch', requireAuth, upload.array('files', 20), async
             data.edits.push(record)
             return record.id
           })
-          const data = await callWithFallback(settings, '/images/edits', { model: settings.model, prompt, images: [{ image_url: imageUrl }], size, quality }, (status) => {
+          const data = await callImageApiWithRetry({ baseUrl: settings.base_url || defaultBaseUrl, apiKey: settings.api_key, endpoint: '/images/edits', payload: { model: settings.model, prompt, images: [{ image_url: imageUrl }], size, quality } }, 2, (status) => {
             if (status.type === 'attempt') job.results[index].progressText = `调用 ${status.baseUrl}，第 ${status.attempt}/${status.max} 次`
             if (status.type === 'retry') job.results[index].progressText = `${status.baseUrl} 超时/失败，8秒后重试第 ${status.nextAttempt}/${status.max} 次`
-            if (status.type === 'fallback') job.results[index].progressText = `主线路失败，切换备用线路 ${status.to}`
             if (status.type === 'poll') job.results[index].progressText = `正在第 ${status.pollCount} 次查询上游任务`
             if (status.type === 'poll-result') job.results[index].progressText = `第 ${status.pollCount} 次查询：${status.status}`
             const progress = job.results[index].progressText
