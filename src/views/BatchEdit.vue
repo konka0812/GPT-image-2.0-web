@@ -147,7 +147,7 @@ function schedulePoll() {
   timer = setTimeout(async () => {
     await pollJob()
     schedulePoll()
-  }, 1500)
+  }, 8000)
 }
 
 async function edit(targetFiles = files.value) {

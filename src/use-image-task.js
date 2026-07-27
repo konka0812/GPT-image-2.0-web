@@ -54,7 +54,7 @@ export function useImageTask(kind) {
     pollTimer = setTimeout(async () => {
       await poll()
       schedulePoll()
-    }, 2000)
+    }, 8000)
   }
 
   async function start(jobId) {

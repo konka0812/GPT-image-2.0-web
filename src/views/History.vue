@@ -74,7 +74,7 @@ onMounted(() => {
   load()
   refreshTimer = setInterval(() => {
     if ([...generations.value, ...edits.value].some((item) => item.status === 'running')) load()
-  }, 3000)
+  }, 8000)
 })
 onBeforeUnmount(() => clearInterval(refreshTimer))
 </script>
