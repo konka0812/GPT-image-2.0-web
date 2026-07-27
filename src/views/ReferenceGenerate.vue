@@ -50,14 +50,15 @@
           <select v-model="form.quality" class="field"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select>
           <select v-model="form.output_format" class="field"><option value="png">png</option><option value="jpeg">jpeg</option><option value="webp">webp</option></select>
         </div>
-        <button class="btn btn-primary w-full shrink-0" :disabled="loading" @click="generate">{{ loading ? '生成中...' : '生成新图' }}</button>
+        <button class="btn btn-primary w-full shrink-0" :disabled="busy" @click="generate">{{ submitting ? '正在提交...' : loading ? '生成中...' : '生成新图' }}</button>
+        <p v-if="notice" class="shrink-0 rounded-xl bg-cyan-500/15 p-3 text-sm text-cyan-100">{{ notice }}</p>
         <p v-if="error" class="shrink-0 rounded-xl bg-red-500/15 p-3 text-sm text-red-200">{{ error }}</p>
       </div>
     </section>
 
     <section class="card flex min-h-[60vh] flex-col rounded-3xl p-6 lg:min-h-0">
       <h2 class="mb-4 shrink-0 text-xl font-bold">生成结果</h2>
-      <div v-if="loading" class="flex min-h-0 flex-1 items-center justify-center rounded-3xl border border-dashed border-white/15 text-slate-400">正在根据参考图生成</div>
+      <div v-if="loading" class="flex min-h-0 flex-1 items-center justify-center rounded-3xl border border-dashed border-white/15 p-6"><TaskStatus :job="job" :elapsed="elapsed" title="正在根据参考图生成" /></div>
       <div v-else-if="!images.length" class="flex min-h-0 flex-1 items-center justify-center rounded-3xl border border-dashed border-white/15 text-slate-400">结果会显示在这里</div>
       <div v-else class="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden">
         <img :src="images[0]" class="min-h-0 flex-1 rounded-3xl object-contain" />
@@ -71,13 +72,13 @@
 import axios from 'axios'
 import { onBeforeUnmount, ref } from 'vue'
 import { appendReferenceFiles, maxReferenceImages, moveReferenceFile, removeReferenceFile } from '../reference-images.js'
+import TaskStatus from '../components/TaskStatus.vue'
+import { useImageTask } from '../use-image-task.js'
 
 const sizes = ['1024x1024', '1536x1024', '1024x1536', '2048x2048', '2160x3840', '3840x2160']
 const form = ref({ prompt: '', size: '1024x1024', quality: 'low', output_format: 'png' })
 const items = ref([])
-const images = ref([])
-const error = ref('')
-const loading = ref(false)
+const { job, images, error, notice, submitting, loading, busy, elapsed, start } = useImageTask('reference')
 const dragIndex = ref(-1)
 
 function onFiles(event) {
@@ -121,18 +122,20 @@ async function generate() {
   error.value = ''
   if (!items.value.length) return (error.value = '请至少上传 1 张参考图')
   if (!form.value.prompt.trim()) return (error.value = '请输入提示词')
-  loading.value = true
+  if (busy.value) return
+  submitting.value = true
+  notice.value = '正在上传参考图并提交任务，请勿重复点击'
   images.value = []
   try {
     const data = new FormData()
     items.value.forEach((item) => data.append('files', item.file))
     Object.entries(form.value).forEach(([key, value]) => data.append(key, value))
     const response = await axios.post('/api/images/reference', data)
-    images.value = response.data.images
+    await start(response.data.jobId)
   } catch (requestError) {
     error.value = requestError.response?.data?.error || requestError.message
   } finally {
-    loading.value = false
+    submitting.value = false
   }
 }
 

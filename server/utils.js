@@ -56,13 +56,16 @@ export function isCompletedImageTask(data) {
   return Array.isArray(data?.data) && data.data.some((item) => item?.b64_json || item?.url)
 }
 
-async function pollAsyncTask({ baseUrl, apiKey, pollUrl, pollAfterMs = 3000 }) {
+async function pollAsyncTask({ baseUrl, apiKey, pollUrl, pollAfterMs = 3000, onStatus = () => {} }) {
   const url = resolvePollUrl(baseUrl, pollUrl)
   const maxWaitMs = 300000
   const intervalMs = Math.max(1000, Math.min(pollAfterMs || 3000, 10000))
   const start = Date.now()
+  let pollCount = 0
   while (Date.now() - start < maxWaitMs) {
     await sleep(intervalMs)
+    pollCount += 1
+    onStatus({ type: 'poll', pollCount, status: 'running', baseUrl })
     const response = await fetch(url, {
       headers: { Authorization: `Bearer ${apiKey}` },
       signal: AbortSignal.timeout(60000)
@@ -75,6 +78,7 @@ async function pollAsyncTask({ baseUrl, apiKey, pollUrl, pollAfterMs = 3000 }) {
       throw new Error(typeof message === 'string' ? message.slice(0, 300) : JSON.stringify(message))
     }
     const status = data?.status
+    onStatus({ type: 'poll-result', pollCount, status: status || 'processing', baseUrl })
     if (isCompletedImageTask(data) || status === 'succeeded' || status === 'completed' || status === 'success') return data
     if (status === 'failed' || status === 'error' || status === 'rejected') {
       throw new Error(data?.message || data?.error?.message || '上游任务失败')
@@ -83,7 +87,7 @@ async function pollAsyncTask({ baseUrl, apiKey, pollUrl, pollAfterMs = 3000 }) {
   throw new Error('上游任务处理超时，请降低质量/尺寸后重试')
 }
 
-export async function callImageApi({ baseUrl, apiKey, endpoint, payload }) {
+export async function callImageApi({ baseUrl, apiKey, endpoint, payload, onStatus = () => {} }) {
   const response = await fetch(`${baseUrl.replace(/\/$/, '')}${endpoint}`, {
     method: 'POST',
     headers: {
@@ -97,7 +101,8 @@ export async function callImageApi({ baseUrl, apiKey, endpoint, payload }) {
   let data
   try { data = JSON.parse(text) } catch { data = { error: text } }
   if (response.status === 202 && data?.poll_url) {
-    return pollAsyncTask({ baseUrl, apiKey, pollUrl: data.poll_url, pollAfterMs: data.poll_after_ms })
+    onStatus({ type: 'accepted', status: data.status || 'queued', baseUrl })
+    return pollAsyncTask({ baseUrl, apiKey, pollUrl: data.poll_url, pollAfterMs: data.poll_after_ms, onStatus })
   }
   if (!response.ok) {
     if (response.status === 524 || text.includes('Error code 524') || text.includes('A timeout occurred')) {
@@ -116,7 +121,7 @@ export async function callImageApiWithRetry(args, retries = 2, onStatus = () => 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       onStatus({ type: 'attempt', attempt: attempt + 1, max: retries + 1, baseUrl: args.baseUrl })
-      return await callImageApi(args)
+      return await callImageApi({ ...args, onStatus })
     } catch (error) {
       lastError = error
       if (attempt === retries || !isRetryable(error)) throw error

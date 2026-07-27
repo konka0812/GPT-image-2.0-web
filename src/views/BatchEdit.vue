@@ -14,7 +14,7 @@
           <div class="h-3 overflow-hidden rounded-full bg-white/10">
             <div class="h-full rounded-full bg-gradient-to-r from-violet-500 to-cyan-400 transition-all" :style="{ width: progress + '%' }"></div>
           </div>
-          <div class="mt-2 text-xs text-slate-400">运行中 {{ running }}，成功 {{ successCount }}，失败 {{ failedCount }}</div>
+          <div class="mt-2 text-xs text-slate-400">运行中 {{ running }}，成功 {{ successCount }}，失败 {{ failedCount }}，已查询 {{ queryCount }} 次</div>
         </div>
         <textarea v-model="form.prompt" class="field min-h-0 flex-1 resize-none" placeholder="把背景换成纯白色，保持商品主体不变，添加柔和底部阴影" />
         <select v-model="form.size" class="field"><option v-for="s in sizes" :key="s">{{ s }}</option></select>
@@ -23,6 +23,7 @@
           <select v-model="form.output_format" class="field"><option value="png">png</option><option value="jpeg">jpeg</option><option value="webp">webp</option></select>
         </div>
         <button class="btn btn-primary w-full" :disabled="loading" @click="edit()">{{ loading ? '批量处理中...' : '开始批量改图' }}</button>
+        <p v-if="notice" class="rounded-xl bg-cyan-500/15 p-3 text-sm text-cyan-100">{{ notice }}</p>
         <p v-if="error" class="rounded-xl bg-red-500/15 p-3 text-sm text-red-200">{{ error }}</p>
       </div>
     </section>
@@ -64,7 +65,8 @@
 <script setup>
 import axios from 'axios'
 import JSZip from 'jszip'
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { taskStorageKey } from '../task-feedback.js'
 
 const sizes = ['1024x1024', '1536x1024', '1024x1536', '2048x2048', '2160x3840', '3840x2160']
 const form = ref({ prompt: '', size: '1024x1024', quality: 'low', output_format: 'png' })
@@ -73,12 +75,15 @@ const results = ref([])
 const selected = ref([])
 const preview = ref('')
 const error = ref('')
+const notice = ref('')
 const loading = ref(false)
 const jobId = ref('')
 const total = ref(0)
 const completed = ref(0)
 const running = ref(0)
+const queryCount = ref(0)
 let timer = null
+let stopped = true
 const successCount = computed(() => results.value.filter((item) => item.status === 'success' && item.images?.length).length)
 const failedCount = computed(() => results.value.filter((item) => item.status === 'failed').length)
 const progress = computed(() => total.value ? Math.round((completed.value / total.value) * 100) : 0)
@@ -108,25 +113,47 @@ function toggleAll() {
 }
 
 function stopPolling() {
-  if (timer) clearInterval(timer)
+  stopped = true
+  if (timer) clearTimeout(timer)
   timer = null
 }
 
 async function pollJob() {
-  const { data } = await axios.get(`/api/images/edit/batch/${jobId.value}`)
-  total.value = data.total
-  completed.value = data.completed
-  running.value = data.running
-  results.value = data.results
-  if (data.status !== 'running') {
-    loading.value = false
-    stopPolling()
+  if (!jobId.value || stopped) return
+  try {
+    const { data } = await axios.get(`/api/images/edit/batch/${jobId.value}`)
+    total.value = data.total
+    completed.value = data.completed
+    running.value = data.running
+    queryCount.value = data.queryCount || queryCount.value + 1
+    results.value = data.results
+    if (data.status !== 'running') {
+      loading.value = false
+      sessionStorage.removeItem(taskStorageKey('batch'))
+      stopPolling()
+    }
+  } catch (requestError) {
+    error.value = requestError.response?.data?.error || requestError.message
+    if (requestError.response?.status === 404) {
+      loading.value = false
+      sessionStorage.removeItem(taskStorageKey('batch'))
+      stopPolling()
+    }
   }
+}
+
+function schedulePoll() {
+  if (stopped || !loading.value) return
+  timer = setTimeout(async () => {
+    await pollJob()
+    schedulePoll()
+  }, 1500)
 }
 
 async function edit(targetFiles = files.value) {
   error.value = ''
   loading.value = true
+  notice.value = '正在上传图片并提交批量任务，请勿重复点击'
   selected.value = []
   results.value = []
   completed.value = 0
@@ -138,11 +165,14 @@ async function edit(targetFiles = files.value) {
     targetFiles.forEach((file) => data.append('files', file))
     const res = await axios.post('/api/images/edit/batch', data)
     jobId.value = res.data.jobId
+    sessionStorage.setItem(taskStorageKey('batch'), jobId.value)
+    notice.value = `批量任务已提交（${jobId.value}），请勿重复点击`
     total.value = targetFiles.length
     results.value = targetFiles.map((file, index) => ({ index, name: file.name, status: 'queued', progressText: '排队中', images: [] }))
-    await pollJob()
     stopPolling()
-    timer = setInterval(pollJob, 1500)
+    stopped = false
+    await pollJob()
+    schedulePoll()
   } catch (e) {
     error.value = e.response?.data?.error || e.message
     loading.value = false
@@ -172,5 +202,13 @@ async function downloadSelected() {
   URL.revokeObjectURL(a.href)
 }
 
+onMounted(() => {
+  const savedJobId = sessionStorage.getItem(taskStorageKey('batch'))
+  if (!savedJobId) return
+  jobId.value = savedJobId
+  loading.value = true
+  stopped = false
+  void pollJob().then(schedulePoll)
+})
 onBeforeUnmount(stopPolling)
 </script>

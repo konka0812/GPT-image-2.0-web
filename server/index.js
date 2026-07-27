@@ -7,6 +7,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { viewDb, withDb } from './db.js'
 import { requireAuth, signToken } from './auth.js'
+import { completeJob, createJob, failJob, getJob, updateJob } from './jobs.js'
 import { buildReferencePayload, maxReferenceImageBytes, validateReferenceFiles } from './reference.js'
 import { defaultModel, normalizeModel, requireModel } from './settings.js'
 import { assertEnum, callImageApiWithRetry, formats, qualities, saveImage, sizes } from './utils.js'
@@ -41,6 +42,12 @@ function uploadReferenceImages(req, res, next) {
 app.use(cors())
 app.use(express.json({ limit: '60mb' }))
 app.use('/uploads', express.static(process.env.UPLOAD_DIR || path.join(rootDir, 'uploads')))
+
+await withDb((data) => {
+  for (const record of [...data.generations, ...data.edits]) {
+    if (record.status === 'running') Object.assign(record, { status: 'interrupted', phase: 'interrupted', progress_text: '服务曾重启，任务状态无法继续跟踪，请重新提交', completed_at: new Date().toISOString() })
+  }
+})
 
 app.post('/api/auth/register', async (req, res) => {
   try {
@@ -108,6 +115,53 @@ async function callWithFallback(settings, endpoint, payload, onStatus = () => {}
   }
 }
 
+function historyRecord(data, kind, recordId) {
+  const records = kind === 'generate' ? data.generations : data.edits
+  return records.find((record) => record.id === recordId)
+}
+
+async function updateJobHistory(job, fields) {
+  await withDb((data) => {
+    const record = historyRecord(data, job.kind, job.recordId)
+    if (record) Object.assign(record, fields)
+  })
+}
+
+function reportJobStatus(job, status) {
+  let fields = {}
+  if (status.type === 'attempt') fields = { phase: 'calling', progressText: `正在调用 ${status.baseUrl}，第 ${status.attempt}/${status.max} 次`, attempt: status.attempt, maxAttempts: status.max, baseUrl: status.baseUrl }
+  if (status.type === 'retry') fields = { phase: 'retry', progressText: `调用失败，等待后进行第 ${status.nextAttempt}/${status.max} 次尝试`, attempt: status.attempt, maxAttempts: status.max, baseUrl: status.baseUrl }
+  if (status.type === 'fallback') fields = { phase: 'fallback', progressText: `主线路失败，切换备用线路 ${status.to}`, baseUrl: status.to }
+  if (status.type === 'accepted') fields = { phase: 'accepted', progressText: '上游已接受任务，等待处理', baseUrl: status.baseUrl }
+  if (status.type === 'poll') fields = { phase: 'polling', progressText: `正在第 ${status.pollCount} 次查询上游任务`, pollCount: status.pollCount, baseUrl: status.baseUrl }
+  if (status.type === 'poll-result') fields = { phase: 'polling', progressText: `第 ${status.pollCount} 次查询：${status.status}`, pollCount: status.pollCount, baseUrl: status.baseUrl }
+  if (!Object.keys(fields).length) return
+  updateJob(job.id, fields)
+  void updateJobHistory(job, { phase: fields.phase, progress_text: fields.progressText, attempt: fields.attempt, poll_count: fields.pollCount, base_url: fields.baseUrl }).catch(() => {})
+}
+
+async function finishImageJob(job, settings, endpoint, payload, outputFormat, maxImages = Infinity) {
+  try {
+    const result = await callWithFallback(settings, endpoint, payload, (status) => reportJobStatus(job, status))
+    updateJob(job.id, { phase: 'saving', progressText: '上游处理完成，正在保存图片' })
+    await updateJobHistory(job, { phase: 'saving', progress_text: '上游处理完成，正在保存图片' }).catch(() => {})
+    const images = []
+    for (const item of (result.data || []).slice(0, maxImages)) images.push(await saveImage(item, outputFormat))
+    if (!images.length) throw new Error('上游未返回生成图片')
+    completeJob(job.id, images)
+    await updateJobHistory(job, { image_path: JSON.stringify(images), status: 'success', phase: 'success', progress_text: '处理成功', completed_at: new Date().toISOString() }).catch(() => {})
+  } catch (error) {
+    failJob(job.id, error)
+    await updateJobHistory(job, { status: 'failed', phase: 'failed', progress_text: error.message, error: error.message, completed_at: new Date().toISOString() }).catch(() => {})
+  }
+}
+
+app.get('/api/images/tasks/:jobId', requireAuth, (req, res) => {
+  const job = getJob(req.params.jobId, req.user.id)
+  if (!job) return res.status(404).json({ error: '任务不存在或无权访问' })
+  res.json(job)
+})
+
 app.post('/api/images/generate', requireAuth, async (req, res) => {
   const prompt = String(req.body.prompt || '').trim()
   const size = assertEnum(req.body.size, sizes, '1024x1024')
@@ -123,11 +177,10 @@ app.post('/api/images/generate', requireAuth, async (req, res) => {
       data.generations.push(record)
       return record.id
     })
-    const data = await callWithFallback(settings, '/images/generations', { model: settings.model, prompt, size, quality, output_format: outputFormat, n })
-    const images = []
-    for (const item of data.data || []) images.push(await saveImage(item, outputFormat))
-    await withDb((data) => Object.assign(data.generations.find((r) => r.id === recordId), { image_path: JSON.stringify(images), status: 'success' }))
-    res.json({ images })
+    const job = createJob({ userId: req.user.id, kind: 'generate', recordId })
+    await updateJobHistory(job, { job_id: job.id, phase: job.phase, progress_text: job.progressText, started_at: new Date(job.createdAt).toISOString() })
+    res.status(202).json({ jobId: job.id })
+    void finishImageJob(job, settings, '/images/generations', { model: settings.model, prompt, size, quality, output_format: outputFormat, n }, outputFormat).catch((error) => failJob(job.id, error))
   } catch (error) {
     if (recordId) await withDb((data) => Object.assign(data.generations.find((r) => r.id === recordId), { status: 'failed', error: error.message }))
     res.status(500).json({ error: error.message })
@@ -150,14 +203,10 @@ app.post('/api/images/edit', requireAuth, upload.single('file'), async (req, res
       data.edits.push(record)
       return record.id
     })
-    const result = await callWithFallback(settings, '/images/edits', { model: settings.model, prompt, images: [{ image_url: imageUrl }], size, quality })
-    const images = []
-    for (const item of result.data || []) images.push(await saveImage(item, outputFormat))
-    await withDb((data) => {
-      const record = data.edits.find((r) => r.id === recordId)
-      if (record) Object.assign(record, { image_path: JSON.stringify(images), status: 'success' })
-    })
-    res.json({ images })
+    const job = createJob({ userId: req.user.id, kind: 'edit', recordId })
+    await updateJobHistory(job, { job_id: job.id, phase: job.phase, progress_text: job.progressText, started_at: new Date(job.createdAt).toISOString() })
+    res.status(202).json({ jobId: job.id })
+    void finishImageJob(job, settings, '/images/edits', { model: settings.model, prompt, images: [{ image_url: imageUrl }], size, quality }, outputFormat).catch((error) => failJob(job.id, error))
   } catch (error) {
     if (recordId) await withDb((data) => {
       const record = data.edits.find((r) => r.id === recordId)
@@ -188,15 +237,10 @@ app.post('/api/images/reference', requireAuth, uploadReferenceImages, async (req
       data.edits.push(record)
       return record.id
     })
-    const result = await callWithFallback(settings, '/images/edits', payload)
-    const item = result.data?.[0]
-    if (!item) throw new Error('上游未返回生成图片')
-    const images = [await saveImage(item, outputFormat)]
-    await withDb((data) => {
-      const record = data.edits.find((entry) => entry.id === recordId)
-      if (record) Object.assign(record, { image_path: JSON.stringify(images), status: 'success' })
-    })
-    res.json({ images })
+    const job = createJob({ userId: req.user.id, kind: 'reference', recordId })
+    await updateJobHistory(job, { job_id: job.id, phase: job.phase, progress_text: job.progressText, started_at: new Date(job.createdAt).toISOString() })
+    res.status(202).json({ jobId: job.id })
+    void finishImageJob(job, settings, '/images/edits', payload, outputFormat, 1).catch((error) => failJob(job.id, error))
   } catch (error) {
     if (recordId) await withDb((data) => {
       const record = data.edits.find((entry) => entry.id === recordId)
@@ -225,6 +269,7 @@ app.post('/api/images/edit/batch', requireAuth, upload.array('files', 20), async
       running: 0,
       status: 'running',
       results: files.map((file, index) => ({ index, name: file.originalname, status: 'queued', progressText: '排队中', images: [] })),
+      queryCount: 0,
       createdAt: Date.now()
     }
     batchJobs.set(jobId, job)
@@ -241,7 +286,7 @@ app.post('/api/images/edit/batch', requireAuth, upload.array('files', 20), async
         let recordId
         try {
           recordId = await withDb((data) => {
-            const record = { id: data.seq.edits++, user_id: req.user.id, prompt, size, quality, output_format: outputFormat, source_image: file.originalname, image_path: '', status: 'running', error: '', created_at: new Date().toISOString() }
+            const record = { id: data.seq.edits++, user_id: req.user.id, prompt, size, quality, output_format: outputFormat, source_image: file.originalname, image_path: '', status: 'running', error: '', created_at: new Date().toISOString(), job_id: jobId, phase: 'queued', progress_text: '排队中', started_at: new Date().toISOString() }
             data.edits.push(record)
             return record.id
           })
@@ -249,13 +294,20 @@ app.post('/api/images/edit/batch', requireAuth, upload.array('files', 20), async
             if (status.type === 'attempt') job.results[index].progressText = `调用 ${status.baseUrl}，第 ${status.attempt}/${status.max} 次`
             if (status.type === 'retry') job.results[index].progressText = `${status.baseUrl} 超时/失败，8秒后重试第 ${status.nextAttempt}/${status.max} 次`
             if (status.type === 'fallback') job.results[index].progressText = `主线路失败，切换备用线路 ${status.to}`
+            if (status.type === 'poll') job.results[index].progressText = `正在第 ${status.pollCount} 次查询上游任务`
+            if (status.type === 'poll-result') job.results[index].progressText = `第 ${status.pollCount} 次查询：${status.status}`
+            const progress = job.results[index].progressText
+            void withDb((data) => {
+              const record = data.edits.find((entry) => entry.id === recordId)
+              if (record) Object.assign(record, { phase: status.type, progress_text: progress, attempt: status.attempt, poll_count: status.pollCount, base_url: status.baseUrl })
+            }).catch(() => {})
           })
           const images = []
           for (const item of data.data || []) images.push(await saveImage(item, outputFormat))
-          await withDb((data) => Object.assign(data.edits.find((r) => r.id === recordId), { image_path: JSON.stringify(images), status: 'success' }))
+          await withDb((data) => Object.assign(data.edits.find((r) => r.id === recordId), { image_path: JSON.stringify(images), status: 'success', phase: 'success', progress_text: '处理成功', completed_at: new Date().toISOString() }))
           job.results[index] = { index, name: file.originalname, status: 'success', progressText: '处理成功', images }
         } catch (error) {
-          if (recordId) await withDb((data) => Object.assign(data.edits.find((r) => r.id === recordId), { status: 'failed', error: chunkError(error) }))
+          if (recordId) await withDb((data) => Object.assign(data.edits.find((r) => r.id === recordId), { status: 'failed', phase: 'failed', progress_text: chunkError(error), error: chunkError(error), completed_at: new Date().toISOString() }))
           job.results[index] = { index, name: file.originalname, status: 'failed', progressText: chunkError(error), error: chunkError(error), images: [] }
         } finally {
           job.running -= 1
@@ -278,6 +330,7 @@ app.post('/api/images/edit/batch', requireAuth, upload.array('files', 20), async
 app.get('/api/images/edit/batch/:jobId', requireAuth, (req, res) => {
   const job = batchJobs.get(req.params.jobId)
   if (!job || job.userId !== req.user.id) return res.status(404).json({ error: '任务不存在' })
+  job.queryCount += 1
   res.json(job)
 })
 
