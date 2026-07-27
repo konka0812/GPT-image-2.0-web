@@ -8,6 +8,7 @@ export function useImageTask(kind) {
   const error = ref('')
   const notice = ref('')
   const submitting = ref(false)
+  const queryCount = ref(0)
   const now = ref(Date.now())
   let pollTimer
   let clockTimer
@@ -29,6 +30,7 @@ export function useImageTask(kind) {
     const activeId = job.value?.id
     if (!activeId || stopped) return
     try {
+      queryCount.value += 1
       const { data } = await axios.get(taskStatusUrl(activeId))
       if (stopped || job.value?.id !== activeId) return
       job.value = data
@@ -61,6 +63,7 @@ export function useImageTask(kind) {
     const createdAt = Date.now()
     job.value = { id: jobId, status: 'running', phase: 'queued', progressText: '任务已提交，等待处理', createdAt, attempt: 0, maxAttempts: 0, pollCount: 0, baseUrl: '' }
     images.value = []
+    queryCount.value = 0
     error.value = ''
     notice.value = submissionMessage(jobId)
     sessionStorage.setItem(taskStorageKey(kind), jobId)
@@ -77,5 +80,5 @@ export function useImageTask(kind) {
   })
   onBeforeUnmount(stopPolling)
 
-  return { job, images, error, notice, submitting, loading, busy, elapsed, start }
+  return { job, images, error, notice, submitting, loading, busy, elapsed, queryCount, start }
 }

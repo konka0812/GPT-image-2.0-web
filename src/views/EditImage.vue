@@ -26,7 +26,7 @@
       </div>
       <div class="card flex min-h-0 flex-col rounded-3xl p-6">
         <h2 class="mb-4 shrink-0 text-xl font-bold">结果</h2>
-        <div v-if="loading" class="flex min-h-0 flex-1 items-center justify-center rounded-3xl border border-dashed border-white/15 p-6"><TaskStatus :job="job" :elapsed="elapsed" title="正在编辑图片" /></div>
+        <div v-if="loading" class="flex min-h-0 flex-1 items-center justify-center rounded-3xl border border-dashed border-white/15 p-6"><TaskStatus :job="job" :elapsed="elapsed" :query-count="queryCount" title="正在编辑图片" /></div>
         <div v-else-if="!images.length" class="flex min-h-0 flex-1 items-center justify-center rounded-3xl border border-dashed border-white/15 text-slate-400">结果会显示在这里</div>
         <div v-else class="flex min-h-0 flex-1 flex-col space-y-4 overflow-hidden">
           <img :src="images[0]" class="h-full w-full min-h-0 flex-1 object-contain" />
@@ -47,7 +47,7 @@ const sizes = ['1024x1024', '1536x1024', '1024x1536', '2048x2048', '2160x3840', 
 const form = ref({ prompt: '', size: '1024x1024', quality: 'low', output_format: 'png' })
 const file = ref(null)
 const preview = ref('')
-const { job, images, error, notice, submitting, loading, busy, elapsed, start } = useImageTask('edit')
+const { job, images, error, notice, submitting, loading, busy, elapsed, queryCount, start } = useImageTask('edit')
 
 function onFile(e) {
   file.value = e.target.files?.[0] || null
