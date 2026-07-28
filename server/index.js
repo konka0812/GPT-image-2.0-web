@@ -337,6 +337,18 @@ app.delete('/api/history', requireAuth, async (req, res) => {
   res.json({ ok: true })
 })
 
+app.delete('/api/history/:kind/:id', requireAuth, async (req, res) => {
+  const kind = req.params.kind
+  const id = Number(req.params.id)
+  if (kind !== 'generation' && kind !== 'edit') return res.status(400).json({ error: '类型错误' })
+  await withDb((data) => {
+    const records = kind === 'generation' ? data.generations : data.edits
+    const index = records.findIndex((r) => r.id === id && r.user_id === req.user.id)
+    if (index >= 0) records.splice(index, 1)
+  })
+  res.json({ ok: true })
+})
+
 app.use(express.static(path.join(rootDir, 'dist')))
 app.get(/.*/, (req, res) => res.sendFile(path.join(rootDir, 'dist', 'index.html')))
 

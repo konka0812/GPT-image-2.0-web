@@ -19,6 +19,13 @@ test('server exposes user-owned async image task status', async () => {
   assert.match(source, /getJob\(req\.params\.jobId, req\.user\.id\)/)
 })
 
+test('server exposes per-record history delete endpoint scoped to user', async () => {
+  const source = await fs.readFile(new URL('../server/index.js', import.meta.url), 'utf8')
+  assert.match(source, /app\.delete\('\/api\/history\/:kind\/:id'/)
+  assert.match(source, /kind !== 'generation' && kind !== 'edit'/)
+  assert.match(source, /r\.user_id === req\.user\.id/)
+})
+
 test('server uses the primary provider as its default without a cross-provider fallback', async () => {
   const source = await fs.readFile(new URL('../server/index.js', import.meta.url), 'utf8')
   assert.match(source, /const defaultBaseUrl = 'https:\/\/api\.uselg\.top\/v1'/)
