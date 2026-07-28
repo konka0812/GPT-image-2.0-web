@@ -16,7 +16,7 @@
           </div>
           <div class="mt-2 text-xs text-slate-400">运行中 {{ running }}，成功 {{ successCount }}，失败 {{ failedCount }}，已查询 {{ queryCount }} 次</div>
         </div>
-        <div class="relative">
+        <div class="relative flex min-h-0 flex-1 flex-col">
           <textarea v-model="form.prompt" class="field min-h-0 flex-1 resize-none pr-10" placeholder="把背景换成纯白色，保持商品主体不变，添加柔和底部阴影" />
           <PromptOptimizer v-model="form.prompt" type="batch" />
         </div>

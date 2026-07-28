@@ -4,7 +4,7 @@
       <h1 class="text-2xl font-black">AI 生图</h1>
       <p class="mt-2 text-sm text-slate-400">输入提示词生成图片</p>
       <div class="mt-6 flex min-h-0 flex-1 flex-col space-y-4">
-        <div class="relative">
+        <div class="relative flex min-h-0 flex-1 flex-col">
           <textarea v-model="form.prompt" class="field min-h-0 flex-1 resize-none pr-10" placeholder="一只橘猫坐在赛博朋克霓虹街道上，旁边有「深夜食堂」招牌，中文清晰可读" />
           <PromptOptimizer v-model="form.prompt" type="generate" />
         </div>
