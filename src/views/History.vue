@@ -7,6 +7,7 @@
         <button class="rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-2 text-sm text-red-200" @click="clearHistory">一键清空</button>
       </div>
     </div>
+    <p v-if="refreshMessage" class="rounded-xl bg-emerald-500/15 px-4 py-2 text-sm text-emerald-200">{{ refreshMessage }}</p>
     <section class="grid min-h-0 flex-1 gap-6 lg:grid-cols-2">
       <div class="card min-h-0 overflow-hidden rounded-3xl p-6">
         <h2 class="mb-4 text-xl font-bold">生图记录</h2>
@@ -47,6 +48,7 @@ const generations = ref([])
 const edits = ref([])
 const previewImages = ref([])
 const previewIndex = ref(0)
+const refreshMessage = ref('')
 let refreshTimer
 let loadSequence = 0
 async function load() {
@@ -55,6 +57,8 @@ async function load() {
   if (sequence !== loadSequence) return
   generations.value = data.generations
   edits.value = data.edits
+  refreshMessage.value = '已刷新'
+  setTimeout(() => { refreshMessage.value = '' }, 2000)
 }
 function openPreview(images) {
   previewImages.value = images
