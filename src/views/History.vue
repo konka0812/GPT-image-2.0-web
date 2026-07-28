@@ -11,14 +11,14 @@
       <div class="card min-h-0 overflow-hidden rounded-3xl p-6">
         <h2 class="mb-4 text-xl font-bold">生图记录</h2>
         <div class="flex max-h-[calc(100%-3rem)] flex-col gap-3 overflow-y-auto pr-2">
-          <RecordCard v-for="item in generations" :key="'g'+item.id" :item="item" @preview="openPreview" />
+          <RecordCard v-for="item in generations" :key="'g'+item.id" :item="item" kind="generation" @preview="openPreview" @delete="removeRecord('generation', item.id)" />
         </div>
         <p v-if="!generations.length" class="text-slate-400">暂无记录</p>
       </div>
       <div class="card min-h-0 overflow-hidden rounded-3xl p-6">
         <h2 class="mb-4 text-xl font-bold">改图记录</h2>
         <div class="flex max-h-[calc(100%-3rem)] flex-col gap-3 overflow-y-auto pr-2">
-          <RecordCard v-for="item in edits" :key="'e'+item.id" :item="item" @preview="openPreview" />
+          <RecordCard v-for="item in edits" :key="'e'+item.id" :item="item" kind="edit" @preview="openPreview" @delete="removeRecord('edit', item.id)" />
         </div>
         <p v-if="!edits.length" class="text-slate-400">暂无记录</p>
       </div>
@@ -69,6 +69,14 @@ async function clearHistory() {
   await axios.delete('/api/history')
   generations.value = []
   edits.value = []
+}
+async function removeRecord(kind, id) {
+  await axios.delete(`/api/history/${kind}/${id}`)
+  if (kind === 'generation') {
+    generations.value = generations.value.filter((item) => item.id !== id)
+  } else {
+    edits.value = edits.value.filter((item) => item.id !== id)
+  }
 }
 onMounted(() => {
   load()

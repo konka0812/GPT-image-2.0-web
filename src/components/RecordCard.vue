@@ -12,9 +12,12 @@
         <p v-if="item.status === 'running'" class="text-xs text-cyan-200">{{ item.progress_text || '任务处理中' }}<span v-if="item.poll_count"> · 第 {{ item.poll_count }} 次查询</span></p>
         <p v-if="item.error" class="text-xs text-red-300">{{ readableError }}</p>
       </div>
-      <div v-if="images.length" class="flex shrink-0 gap-2">
-        <button class="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-cyan-200" @click="$emit('preview', images)">预览</button>
-        <a :href="images[0]" download class="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-cyan-200">下载</a>
+      <div class="flex shrink-0 flex-col gap-2">
+        <div v-if="images.length" class="flex gap-2">
+          <button class="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-cyan-200" @click="$emit('preview', images)">预览</button>
+          <a :href="images[0]" download class="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-cyan-200">下载</a>
+        </div>
+        <button class="rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-1.5 text-xs text-red-200" @click="remove">删除</button>
       </div>
     </div>
   </article>
@@ -25,7 +28,11 @@ import { computed } from 'vue'
 import { describeTaskError, formatElapsed } from '../task-feedback.js'
 
 const props = defineProps({ item: { type: Object, required: true } })
-defineEmits(['preview'])
+const emit = defineEmits(['preview', 'delete'])
+function remove() {
+  if (!confirm('确定删除这条记录吗？')) return
+  emit('delete')
+}
 const images = computed(() => {
   try {
     return JSON.parse(props.item.image_path || '[]')
