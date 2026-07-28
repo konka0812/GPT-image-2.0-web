@@ -15,7 +15,8 @@ export function useImageTask(kind) {
   let stopped = true
 
   const loading = computed(() => job.value?.status === 'running')
-  const busy = computed(() => submitting.value || loading.value)
+  const running = computed(() => loading.value)
+  const busy = computed(() => submitting.value)
   const elapsed = computed(() => job.value ? formatElapsed((now.value - job.value.createdAt) / 1000) : '0秒')
 
   function stopPolling() {
@@ -80,5 +81,5 @@ export function useImageTask(kind) {
   })
   onBeforeUnmount(stopPolling)
 
-  return { job, images, error, notice, submitting, loading, busy, elapsed, queryCount, start }
+  return { job, images, error, notice, submitting, loading, running, busy, elapsed, queryCount, start }
 }
