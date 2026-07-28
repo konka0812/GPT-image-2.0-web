@@ -44,7 +44,7 @@ import TaskStatus from '../components/TaskStatus.vue'
 import { useImageTask } from '../use-image-task.js'
 
 const sizes = ['1024x1024', '1536x1024', '1024x1536', '2048x2048', '2160x3840', '3840x2160']
-const form = ref({ prompt: '', size: '1024x1024', quality: 'low', output_format: 'png', n: 1 })
+const form = ref({ prompt: '', size: '3840x2160', quality: 'high', output_format: 'png', n: 1 })
 const { job, images, error, notice, submitting, loading, busy, elapsed, queryCount, start } = useImageTask('generate')
 
 async function generate() {

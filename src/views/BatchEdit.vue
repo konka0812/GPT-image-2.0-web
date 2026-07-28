@@ -69,7 +69,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { taskStorageKey } from '../task-feedback.js'
 
 const sizes = ['1024x1024', '1536x1024', '1024x1536', '2048x2048', '2160x3840', '3840x2160']
-const form = ref({ prompt: '', size: '1024x1024', quality: 'low', output_format: 'png' })
+const form = ref({ prompt: '', size: '3840x2160', quality: 'high', output_format: 'png' })
 const files = ref([])
 const results = ref([])
 const selected = ref([])
