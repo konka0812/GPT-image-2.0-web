@@ -25,7 +25,9 @@ async function read() {
 }
 
 async function write(data) {
-  await fs.writeFile(dbPath, JSON.stringify(data, null, 2))
+  const tmp = `${dbPath}.tmp`
+  await fs.writeFile(tmp, JSON.stringify(data, null, 2))
+  await fs.rename(tmp, dbPath)
 }
 
 export async function withDb(fn) {

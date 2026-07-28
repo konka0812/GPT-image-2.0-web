@@ -174,7 +174,7 @@ app.post('/api/images/generate', requireAuth, async (req, res) => {
     res.status(202).json({ jobId: job.id })
     void finishImageJob(job, settings, '/images/generations', { model: settings.model, prompt, size, quality, output_format: outputFormat, n }, outputFormat).catch((error) => failJob(job.id, error))
   } catch (error) {
-    if (recordId) await withDb((data) => Object.assign(data.generations.find((r) => r.id === recordId), { status: 'failed', error: error.message }))
+    if (recordId) await withDb((data) => { const r = data.generations.find((r) => r.id === recordId); if (r) Object.assign(r, { status: 'failed', error: error.message }) })
     res.status(500).json({ error: error.message })
   }
 })
@@ -295,10 +295,10 @@ app.post('/api/images/edit/batch', requireAuth, upload.array('files', 20), async
           })
           const images = []
           for (const item of data.data || []) images.push(await saveImage(item, outputFormat))
-          await withDb((data) => Object.assign(data.edits.find((r) => r.id === recordId), { image_path: JSON.stringify(images), status: 'success', phase: 'success', progress_text: '处理成功', completed_at: new Date().toISOString() }))
+          await withDb((data) => { const r = data.edits.find((r) => r.id === recordId); if (r) Object.assign(r, { image_path: JSON.stringify(images), status: 'success', phase: 'success', progress_text: '处理成功', completed_at: new Date().toISOString() }) })
           job.results[index] = { index, name: file.originalname, status: 'success', progressText: '处理成功', images }
         } catch (error) {
-          if (recordId) await withDb((data) => Object.assign(data.edits.find((r) => r.id === recordId), { status: 'failed', phase: 'failed', progress_text: chunkError(error), error: chunkError(error), completed_at: new Date().toISOString() }))
+          if (recordId) await withDb((data) => { const r = data.edits.find((r) => r.id === recordId); if (r) Object.assign(r, { status: 'failed', phase: 'failed', progress_text: chunkError(error), error: chunkError(error), completed_at: new Date().toISOString() }) })
           job.results[index] = { index, name: file.originalname, status: 'failed', progressText: chunkError(error), error: chunkError(error), images: [] }
         } finally {
           job.running -= 1
