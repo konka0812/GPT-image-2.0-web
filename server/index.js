@@ -11,6 +11,7 @@ import { completeJob, createJob, failJob, getJob, updateJob } from './jobs.js'
 import { buildReferencePayload, maxReferenceImageBytes, validateReferenceFiles } from './reference.js'
 import { defaultModel, normalizeModel, requireModel } from './settings.js'
 import { assertEnum, callImageApiWithRetry, formats, qualities, saveImage, sizes } from './utils.js'
+import { optimizePrompt } from './prompt-optimizer.js'
 
 const batchConcurrency = 1
 const defaultBaseUrl = 'https://api.example.com/v1'
@@ -76,8 +77,8 @@ app.post('/api/auth/login', async (req, res) => {
 app.get('/api/settings', requireAuth, async (req, res) => {
   const row = await viewDb((data) => data.settings.find((s) => s.user_id === req.user.id))
   res.json(row
-    ? { base_url: row.base_url, api_key: row.api_key, model: normalizeModel(row.model) }
-    : { base_url: defaultBaseUrl, api_key: '', model: defaultModel })
+    ? { base_url: row.base_url, api_key: row.api_key, model: normalizeModel(row.model), text_model: row.text_model || '', text_base_url: row.text_base_url || '', text_api_key: row.text_api_key || '' }
+    : { base_url: defaultBaseUrl, api_key: '', model: defaultModel, text_model: '', text_base_url: '', text_api_key: '' })
 })
 
 app.post('/api/settings', requireAuth, async (req, res) => {
@@ -90,10 +91,13 @@ app.post('/api/settings', requireAuth, async (req, res) => {
     return res.status(400).json({ error: error.message })
   }
   if (!apiKey) return res.status(400).json({ error: '请填写 API Key' })
+  const textModel = String(req.body.text_model || '').trim()
+  const textBaseUrl = String(req.body.text_base_url || '').trim()
+  const textApiKey = String(req.body.text_api_key || '').trim()
   await withDb((data) => {
     const old = data.settings.find((s) => s.user_id === req.user.id)
-    if (old) Object.assign(old, { base_url: baseUrl, api_key: apiKey, model, updated_at: new Date().toISOString() })
-    else data.settings.push({ user_id: req.user.id, base_url: baseUrl, api_key: apiKey, model, updated_at: new Date().toISOString() })
+    if (old) Object.assign(old, { base_url: baseUrl, api_key: apiKey, model, text_model: textModel, text_base_url: textBaseUrl, text_api_key: textApiKey, updated_at: new Date().toISOString() })
+    else data.settings.push({ user_id: req.user.id, base_url: baseUrl, api_key: apiKey, model, text_model: textModel, text_base_url: textBaseUrl, text_api_key: textApiKey, updated_at: new Date().toISOString() })
   })
   res.json({ ok: true })
 })
@@ -319,6 +323,20 @@ app.get('/api/images/edit/batch/:jobId', requireAuth, (req, res) => {
   if (!job || job.userId !== req.user.id) return res.status(404).json({ error: '任务不存在' })
   job.queryCount += 1
   res.json(job)
+})
+
+app.post('/api/optimize-prompt', requireAuth, async (req, res) => {
+  try {
+    const prompt = String(req.body.prompt || '').trim()
+    const type = String(req.body.type || 'generate').trim()
+    if (!prompt) return res.status(400).json({ error: '请输入提示词' })
+    const row = await viewDb((data) => data.settings.find((s) => s.user_id === req.user.id))
+    if (!row?.text_api_key || !row?.text_base_url || !row?.text_model) return res.status(400).json({ error: '请先在设置页配置文本模型' })
+    const optimized = await optimizePrompt({ prompt, type, settings: row })
+    res.json({ optimized })
+  } catch (error) {
+    res.status(500).json({ error: error.message })
+  }
 })
 
 app.get('/api/history', requireAuth, async (req, res) => {

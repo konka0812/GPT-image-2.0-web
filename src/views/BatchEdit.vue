@@ -16,7 +16,10 @@
           </div>
           <div class="mt-2 text-xs text-slate-400">运行中 {{ running }}，成功 {{ successCount }}，失败 {{ failedCount }}，已查询 {{ queryCount }} 次</div>
         </div>
-        <textarea v-model="form.prompt" class="field min-h-0 flex-1 resize-none" placeholder="把背景换成纯白色，保持商品主体不变，添加柔和底部阴影" />
+        <div class="relative">
+          <textarea v-model="form.prompt" class="field min-h-0 flex-1 resize-none pr-10" placeholder="把背景换成纯白色，保持商品主体不变，添加柔和底部阴影" />
+          <PromptOptimizer v-model="form.prompt" type="batch" />
+        </div>
         <select v-model="form.size" class="field"><option v-for="s in sizes" :key="s">{{ s }}</option></select>
         <div class="grid grid-cols-2 gap-3">
           <select v-model="form.quality" class="field"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select>
@@ -67,6 +70,7 @@ import axios from 'axios'
 import JSZip from 'jszip'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { taskStorageKey } from '../task-feedback.js'
+import PromptOptimizer from '../components/PromptOptimizer.vue'
 
 const sizes = ['1024x1024', '1536x1024', '1024x1536', '2048x2048', '2160x3840', '3840x2160']
 const form = ref({ prompt: '', size: '3840x2160', quality: 'high', output_format: 'png' })

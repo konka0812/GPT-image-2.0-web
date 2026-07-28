@@ -44,7 +44,10 @@
           尚未添加参考图（最多 16 张）
         </div>
 
-        <textarea v-model="form.prompt" class="field min-h-24 flex-1 resize-none" placeholder="例如：Image 1 作为背景，把 Image 2 的人物放在左侧，Image 3 的商品放在右下角，统一光影和透视" />
+        <div class="relative shrink-0">
+          <textarea v-model="form.prompt" class="field min-h-24 flex-1 resize-none pr-10" placeholder="例如：Image 1 作为背景，把 Image 2 的人物放在左侧，Image 3 的商品放在右下角，统一光影和透视" />
+          <PromptOptimizer v-model="form.prompt" type="reference" />
+        </div>
         <select v-model="form.size" class="field shrink-0"><option v-for="size in sizes" :key="size">{{ size }}</option></select>
         <div class="grid shrink-0 grid-cols-2 gap-3">
           <select v-model="form.quality" class="field"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select>
@@ -73,6 +76,7 @@ import axios from 'axios'
 import { onBeforeUnmount, ref } from 'vue'
 import { appendReferenceFiles, maxReferenceImages, moveReferenceFile, removeReferenceFile } from '../reference-images.js'
 import TaskStatus from '../components/TaskStatus.vue'
+import PromptOptimizer from '../components/PromptOptimizer.vue'
 import { useImageTask } from '../use-image-task.js'
 
 const sizes = ['1024x1024', '1536x1024', '1024x1536', '2048x2048', '2160x3840', '3840x2160']
