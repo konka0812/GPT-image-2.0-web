@@ -14,7 +14,7 @@
           <select v-model="form.output_format" class="field"><option value="png">png</option><option value="jpeg">jpeg</option><option value="webp">webp</option></select>
           <select v-model.number="form.n" class="field"><option v-for="n in [1,2,3,4]" :key="n" :value="n">{{ n }}张</option></select>
         </div>
-        <button class="btn btn-primary w-full" :disabled="busy" @click="generate">{{ submitting ? '正在提交...' : loading ? '生成中...' : '开始生成' }}</button>
+        <button class="btn btn-primary w-full" :disabled="busy" @click="generate">{{ submitting ? '正在提交...' : '开始生成' }}</button>
         <p v-if="notice" class="rounded-xl bg-cyan-500/15 p-3 text-sm text-cyan-100">{{ notice }}</p>
         <p v-if="error" class="rounded-xl bg-red-500/15 p-3 text-sm text-red-200">{{ error }}</p>
       </div>

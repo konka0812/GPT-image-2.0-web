@@ -15,7 +15,7 @@ export function describeTaskError(error = '') {
 }
 
 export function submissionMessage(jobId) {
-  return `任务已提交（${jobId}），请勿重复点击`
+  return `任务已提交（${jobId}），可继续提交新任务`
 }
 
 export function taskStatusUrl(jobId) {

@@ -53,7 +53,7 @@
           <select v-model="form.quality" class="field"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select>
           <select v-model="form.output_format" class="field"><option value="png">png</option><option value="jpeg">jpeg</option><option value="webp">webp</option></select>
         </div>
-        <button class="btn btn-primary w-full shrink-0" :disabled="busy" @click="generate">{{ submitting ? '正在提交...' : loading ? '生成中...' : '生成新图' }}</button>
+        <button class="btn btn-primary w-full shrink-0" :disabled="busy" @click="generate">{{ submitting ? '正在提交...' : '生成新图' }}</button>
         <p v-if="notice" class="shrink-0 rounded-xl bg-cyan-500/15 p-3 text-sm text-cyan-100">{{ notice }}</p>
         <p v-if="error" class="shrink-0 rounded-xl bg-red-500/15 p-3 text-sm text-red-200">{{ error }}</p>
       </div>
