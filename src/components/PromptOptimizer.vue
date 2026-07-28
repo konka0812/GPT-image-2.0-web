@@ -13,9 +13,9 @@
     </div>
   </div>
   <div v-if="showResult" class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6" @click="showResult = false">
-    <div class="flex max-h-[80vh] w-full max-w-2xl flex-col gap-4 rounded-2xl border border-white/10 bg-slate-900 p-6" @click.stop>
+    <div class="flex max-h-[85vh] w-full max-w-4xl flex-col gap-4 rounded-2xl border border-white/10 bg-slate-900 p-8" @click.stop>
       <h3 class="text-lg font-bold text-slate-100">优化结果</h3>
-      <textarea v-model="optimized" class="field min-h-48 flex-1 resize-none text-sm leading-6"></textarea>
+      <textarea v-model="optimized" class="field min-h-[400px] flex-1 resize-none text-sm leading-7"></textarea>
       <div class="flex justify-end gap-3">
         <button class="btn border border-white/10" @click="showResult = false">取消</button>
         <button class="btn btn-primary" @click="adopt">采用</button>

@@ -44,7 +44,7 @@
           尚未添加参考图（最多 16 张）
         </div>
 
-        <div class="relative flex shrink-0 flex-col">
+        <div class="relative flex min-h-0 flex-1 flex-col">
           <textarea v-model="form.prompt" class="field min-h-24 flex-1 resize-none pr-10" placeholder="例如：Image 1 作为背景，把 Image 2 的人物放在左侧，Image 3 的商品放在右下角，统一光影和透视" />
           <PromptOptimizer v-model="form.prompt" type="reference" />
         </div>

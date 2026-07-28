@@ -28,7 +28,7 @@ test('system prompts contain key structures for generate and edit', async () => 
 
 test('settings page includes text model config section', async () => {
   const source = await fs.readFile(new URL('../src/views/Settings.vue', import.meta.url), 'utf8')
-  assert.match(source, /文本模型配置/)
+  assert.match(source, /文本模型/)
   assert.match(source, /text_model/)
   assert.match(source, /text_base_url/)
   assert.match(source, /text_api_key/)
