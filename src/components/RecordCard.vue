@@ -3,7 +3,7 @@
     <div class="flex items-start justify-between gap-4">
       <div class="min-w-0 flex-1 space-y-2">
         <div class="flex items-center gap-2">
-          <span class="rounded-full px-2 py-1 text-[11px] font-bold" :class="statusClass">{{ statusText }}</span>
+          <span class="shrink-0 whitespace-nowrap rounded-full px-2 py-1 text-[11px] font-bold" :class="statusClass">{{ statusText }}</span>
           <span class="truncate text-sm font-semibold text-slate-100">{{ item.prompt || '无提示词' }}</span>
         </div>
         <div class="flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-400">
