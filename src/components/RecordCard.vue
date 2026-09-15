@@ -10,6 +10,7 @@
           <span>{{ sizeText }}</span><span>{{ item.quality }}</span><span>{{ item.output_format }}</span><span>{{ createdAt }}</span><span v-if="duration">耗时 {{ duration }}</span>
         </div>
         <p v-if="channelLabel" class="text-xs text-cyan-200/80">{{ channelLabel }}</p>
+        <p v-if="imagesCleared" class="text-xs text-slate-500">图片已清理</p>
         <p v-if="item.status === 'running'" class="text-xs text-cyan-200">{{ item.progress_text || '任务处理中' }}<span v-if="item.poll_count"> · 第 {{ item.poll_count }} 次查询</span></p>
         <p v-if="item.error" class="text-xs text-red-300">{{ readableError }}</p>
       </div>
@@ -53,6 +54,7 @@ const duration = computed(() => {
 })
 const readableError = computed(() => describeTaskError(props.item.error))
 const channelLabel = computed(() => [props.item.channel_name, props.item.group_name, props.item.model_name].filter(Boolean).join(' · '))
+const imagesCleared = computed(() => !images.value.length && Boolean(props.item.images_cleared_at))
 const sizeText = computed(() => {
   const entry = findSizeEntry(props.item.size)
   return entry ? sizeFullLabel(entry) : formatPixels(props.item.size)
