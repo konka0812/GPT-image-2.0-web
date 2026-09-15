@@ -105,3 +105,11 @@ test('settings page has no legacy fallback provider references', async () => {
   const source = await fs.readFile(new URL('../src/views/Settings.vue', import.meta.url), 'utf8')
   assert.doesNotMatch(source, /hk\.testvideo\.site|失败自动切换/)
 })
+
+test('settings page scrolls, is wider and confirms saves with a dialog', async () => {
+  const source = await fs.readFile(new URL('../src/views/Settings.vue', import.meta.url), 'utf8')
+  assert.match(source, /max-w-6xl/)
+  assert.match(source, /overflow-y-auto/)
+  assert.match(source, /保存成功/)
+  assert.match(source, /savedVisible/)
+})
