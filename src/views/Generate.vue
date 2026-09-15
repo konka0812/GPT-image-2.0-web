@@ -8,7 +8,7 @@
           <textarea v-model="form.prompt" class="field min-h-0 flex-1 resize-none pr-10" placeholder="一只橘猫坐在赛博朋克霓虹街道上，旁边有「深夜食堂」招牌，中文清晰可读" />
           <PromptOptimizer v-model="form.prompt" type="generate" />
         </div>
-        <select v-model="form.size" class="field"><option v-for="s in sizes" :key="s">{{ s }}</option></select>
+        <select v-model="form.size" class="field"><option v-for="option in sizeOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select>
         <div class="grid grid-cols-3 gap-3">
           <select v-model="form.quality" class="field"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select>
           <select v-model="form.output_format" class="field"><option value="png">png</option><option value="jpeg">jpeg</option><option value="webp">webp</option></select>
@@ -45,9 +45,9 @@ import axios from 'axios'
 import { ref } from 'vue'
 import TaskStatus from '../components/TaskStatus.vue'
 import PromptOptimizer from '../components/PromptOptimizer.vue'
+import { sizeOptions } from '../image-sizes.js'
 import { useImageTask } from '../use-image-task.js'
 
-const sizes = ['1024x1024', '1536x1024', '1024x1536', '2048x2048', '2160x3840', '3840x2160']
 const form = ref({ prompt: '', size: '3840x2160', quality: 'high', output_format: 'png', n: 1 })
 const { job, images, error, notice, submitting, loading, busy, elapsed, queryCount, start } = useImageTask('generate')
 

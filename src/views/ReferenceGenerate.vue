@@ -48,7 +48,7 @@
           <textarea v-model="form.prompt" class="field min-h-24 flex-1 resize-none pr-10" placeholder="例如：Image 1 作为背景，把 Image 2 的人物放在左侧，Image 3 的商品放在右下角，统一光影和透视" />
           <PromptOptimizer v-model="form.prompt" type="reference" />
         </div>
-        <select v-model="form.size" class="field shrink-0"><option v-for="size in sizes" :key="size">{{ size }}</option></select>
+        <select v-model="form.size" class="field shrink-0"><option v-for="option in sizeOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select>
         <div class="grid shrink-0 grid-cols-2 gap-3">
           <select v-model="form.quality" class="field"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select>
           <select v-model="form.output_format" class="field"><option value="png">png</option><option value="jpeg">jpeg</option><option value="webp">webp</option></select>
@@ -77,9 +77,9 @@ import { onBeforeUnmount, ref } from 'vue'
 import { appendReferenceFiles, maxReferenceImages, moveReferenceFile, removeReferenceFile } from '../reference-images.js'
 import TaskStatus from '../components/TaskStatus.vue'
 import PromptOptimizer from '../components/PromptOptimizer.vue'
+import { sizeOptions } from '../image-sizes.js'
 import { useImageTask } from '../use-image-task.js'
 
-const sizes = ['1024x1024', '1536x1024', '1024x1536', '2048x2048', '2160x3840', '3840x2160']
 const form = ref({ prompt: '', size: '3840x2160', quality: 'high', output_format: 'png' })
 const items = ref([])
 const { job, images, error, notice, submitting, loading, busy, elapsed, queryCount, start } = useImageTask('reference')
