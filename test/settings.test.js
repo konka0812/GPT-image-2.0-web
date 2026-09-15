@@ -121,7 +121,14 @@ test('settings page scrolls, is wider and confirms saves with a dialog', async (
   assert.match(source, /max-w-6xl/)
   assert.match(source, /overflow-y-auto/)
   assert.match(source, /保存成功/)
-  assert.match(source, /savedVisible/)
+  assert.match(source, /showDialog/)
+})
+
+test('settings page exposes orphan image cleanup', async () => {
+  const source = await fs.readFile(new URL('../src/views/Settings.vue', import.meta.url), 'utf8')
+  assert.match(source, /清理无用图片/)
+  assert.match(source, /api\/maintenance\/cleanup-images/)
+  assert.match(source, /api\/maintenance\/image-stats/)
 })
 
 test('settings page requires edit mode before changes', async () => {

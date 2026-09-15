@@ -58,3 +58,10 @@ test('generation history records keep channel, group and model names', async () 
   assert.match(source, /group_name: settings\.group_name/)
   assert.match(source, /model_name: settings\.model_name/)
 })
+
+test('history deletes remove images and expose maintenance endpoints', async () => {
+  const source = await fs.readFile(new URL('../server/index.js', import.meta.url), 'utf8')
+  assert.match(source, /app\.get\('\/api\/maintenance\/image-stats'/)
+  assert.match(source, /app\.post\('\/api\/maintenance\/cleanup-images'/)
+  assert.match(source, /removeUnreferencedImages/)
+})
