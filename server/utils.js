@@ -70,13 +70,23 @@ export function sameSite(url, baseUrl) {
   }
 }
 
+export function resolveAssetUrl(url, baseUrl) {
+  if (!url) return ''
+  try {
+    return baseUrl ? resolvePollUrl(baseUrl, url) : url
+  } catch {
+    return url
+  }
+}
+
 async function downloadImage(url, { apiKey, baseUrl, signed }) {
+  const target = resolveAssetUrl(url, baseUrl)
   const attempts = []
-  if (!signed && apiKey && sameSite(url, baseUrl)) attempts.push({ Authorization: `Bearer ${apiKey}` })
+  if (!signed && apiKey && sameSite(target, baseUrl)) attempts.push({ Authorization: `Bearer ${apiKey}` })
   attempts.push(null)
   let lastError
   for (const headers of attempts) {
-    const response = await fetch(url, headers ? { headers } : {})
+    const response = await fetch(target, headers ? { headers } : {})
     if (response.ok) return Buffer.from(await response.arrayBuffer())
     lastError = new Error(`下载图片失败: HTTP ${response.status}`)
     if (response.status !== 401 && response.status !== 403) throw lastError

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { resolvePollUrl, extractImageItems, isCompletedImageTask, resolveImageSource, sameSite, upstreamStatusLabel } from '../server/utils.js'
+import { resolvePollUrl, extractImageItems, isCompletedImageTask, resolveImageSource, resolveAssetUrl, sameSite, upstreamStatusLabel } from '../server/utils.js'
 
 test('resolvePollUrl resolves root-relative task URLs against the origin', () => {
   assert.equal(
@@ -48,6 +48,18 @@ test('sameSite keeps api keys from leaking to other domains', () => {
   assert.equal(sameSite('https://api.ai-media.vip/a.png', 'https://api.ai-media.vip/v1'), true)
   assert.equal(sameSite('https://evil.example.com/a.png', 'https://api.ai-media.vip/v1'), false)
   assert.equal(sameSite('not-a-url', 'https://api.ai-media.vip/v1'), false)
+})
+
+test('resolveAssetUrl turns platform asset paths into absolute urls', () => {
+  assert.equal(
+    resolveAssetUrl('/v1/images/tasks/imgtask-1/assets/a.png', 'https://api.ai-media.vip/v1'),
+    'https://api.ai-media.vip/v1/images/tasks/imgtask-1/assets/a.png'
+  )
+  assert.equal(
+    resolveAssetUrl('https://media.ai-media.vip/v1/x/a.png', 'https://api.ai-media.vip/v1'),
+    'https://media.ai-media.vip/v1/x/a.png'
+  )
+  assert.equal(resolveAssetUrl('', 'https://api.ai-media.vip/v1'), '')
 })
 
 test('upstreamStatusLabel translates platform statuses', () => {
