@@ -10,7 +10,7 @@ import { requireAuth, signToken } from './auth.js'
 import { completeJob, createJob, failJob, getJob, updateJob } from './jobs.js'
 import { buildReferencePayload, maxReferenceImageBytes, validateReferenceFiles } from './reference.js'
 import { findImageTarget, legacyChannels, normalizeChannels, publicChannels } from './settings.js'
-import { assertEnum, callImageApiWithRetry, formats, qualities, saveImage } from './utils.js'
+import { assertEnum, callImageApiWithRetry, extractImageItems, formats, qualities, saveImage, upstreamStatusLabel } from './utils.js'
 import { optimizePrompt } from './prompt-optimizer.js'
 
 const batchConcurrency = 1
@@ -151,7 +151,7 @@ function reportJobStatus(job, status) {
   if (status.type === 'retry') fields = { phase: 'retry', progressText: `调用失败，等待后进行第 ${status.nextAttempt}/${status.max} 次尝试`, attempt: status.attempt, maxAttempts: status.max, baseUrl: status.baseUrl }
   if (status.type === 'accepted') fields = { phase: 'accepted', progressText: '上游已接受任务，等待处理', baseUrl: status.baseUrl }
   if (status.type === 'poll') fields = { phase: 'polling', progressText: `正在第 ${status.pollCount} 次查询上游任务`, pollCount: status.pollCount, baseUrl: status.baseUrl }
-  if (status.type === 'poll-result') fields = { phase: 'polling', progressText: `第 ${status.pollCount} 次查询：${status.status}`, pollCount: status.pollCount, baseUrl: status.baseUrl }
+  if (status.type === 'poll-result') fields = { phase: 'polling', progressText: `第 ${status.pollCount} 次查询：${upstreamStatusLabel(status.status)}`, pollCount: status.pollCount, baseUrl: status.baseUrl }
   if (!Object.keys(fields).length) return
   updateJob(job.id, fields)
   void updateJobHistory(job, { phase: fields.phase, progress_text: fields.progressText, attempt: fields.attempt, poll_count: fields.pollCount, base_url: fields.baseUrl }).catch(() => {})
@@ -163,7 +163,7 @@ async function finishImageJob(job, settings, endpoint, payload, outputFormat, ma
     updateJob(job.id, { phase: 'saving', progressText: '上游处理完成，正在保存图片' })
     await updateJobHistory(job, { phase: 'saving', progress_text: '上游处理完成，正在保存图片' }).catch(() => {})
     const images = []
-    for (const item of (result.data || []).slice(0, maxImages)) images.push(await saveImage(item, outputFormat))
+    for (const item of extractImageItems(result).slice(0, maxImages)) images.push(await saveImage(item, outputFormat, { apiKey: settings.api_key, baseUrl: settings.base_url }))
     if (!images.length) throw new Error('上游未返回生成图片')
     completeJob(job.id, images)
     await updateJobHistory(job, { image_path: JSON.stringify(images), status: 'success', phase: 'success', progress_text: '处理成功', completed_at: new Date().toISOString() }).catch(() => {})
@@ -319,7 +319,7 @@ app.post('/api/images/edit/batch', requireAuth, upload.array('files', 20), async
             if (status.type === 'attempt') job.results[index].progressText = `调用 ${status.baseUrl}，第 ${status.attempt}/${status.max} 次`
             if (status.type === 'retry') job.results[index].progressText = `${status.baseUrl} 超时/失败，8秒后重试第 ${status.nextAttempt}/${status.max} 次`
             if (status.type === 'poll') job.results[index].progressText = `正在第 ${status.pollCount} 次查询上游任务`
-            if (status.type === 'poll-result') job.results[index].progressText = `第 ${status.pollCount} 次查询：${status.status}`
+            if (status.type === 'poll-result') job.results[index].progressText = `第 ${status.pollCount} 次查询：${upstreamStatusLabel(status.status)}`
             const progress = job.results[index].progressText
             void withDb((data) => {
               const record = data.edits.find((entry) => entry.id === recordId)
@@ -327,7 +327,7 @@ app.post('/api/images/edit/batch', requireAuth, upload.array('files', 20), async
             }).catch(() => {})
           })
           const images = []
-          for (const item of data.data || []) images.push(await saveImage(item, outputFormat))
+          for (const item of extractImageItems(data)) images.push(await saveImage(item, outputFormat, { apiKey: settings.api_key, baseUrl: settings.base_url }))
           await withDb((data) => { const r = data.edits.find((r) => r.id === recordId); if (r) Object.assign(r, { image_path: JSON.stringify(images), status: 'success', phase: 'success', progress_text: '处理成功', completed_at: new Date().toISOString() }) })
           job.results[index] = { index, name: file.originalname, status: 'success', progressText: '处理成功', images }
         } catch (error) {

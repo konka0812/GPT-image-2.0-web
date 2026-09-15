@@ -14,4 +14,5 @@ test('task feedback translates common provider errors', () => {
   assert.match(describeTaskError('HTTP 403'), /权限或内容策略/)
   assert.match(describeTaskError('The operation was aborted due to timeout'), /处理超时/)
   assert.match(describeTaskError('fetch failed'), /连接上游失败/)
+  assert.match(describeTaskError('上游任务已取消'), /已被取消/)
 })
