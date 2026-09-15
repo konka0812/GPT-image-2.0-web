@@ -39,6 +39,26 @@ const upstreamStatusLabels = {
 
 const terminalFailureStatuses = new Set(['failed', 'error', 'rejected', 'canceled', 'cancelled'])
 
+const defaultPollBudgetMs = Number(process.env.POLL_BUDGET_MS || 900000)
+const uncertainPollBudgetMs = Number(process.env.POLL_UNCERTAIN_BUDGET_MS || 1200000)
+const pausedPollGraceMs = Number(process.env.POLL_PAUSED_GRACE_MS || 120000)
+
+export function pollBudgetMs({ baseMs, uncertainMs, sawUncertain }) {
+  return sawUncertain ? uncertainMs : baseMs
+}
+
+export function evaluatePollState({ elapsedMs, budgetMs, pausedMs, pausedGraceMs }) {
+  if (pausedMs >= pausedGraceMs) return { stop: true, reason: 'paused' }
+  if (elapsedMs >= budgetMs) return { stop: true, reason: 'timeout' }
+  return { stop: false, reason: '' }
+}
+
+export function formatWaitMs(ms) {
+  const total = Math.max(0, Math.floor((ms || 0) / 1000))
+  if (total < 60) return `${total}秒`
+  return `${Math.floor(total / 60)}分${String(total % 60).padStart(2, '0')}秒`
+}
+
 export function upstreamStatusLabel(status) {
   return upstreamStatusLabels[status] || status || ''
 }
@@ -128,14 +148,26 @@ export function isCompletedImageTask(payload) {
 
 async function pollAsyncTask({ baseUrl, apiKey, pollUrl, pollAfterMs = 3000, onStatus = () => {} }) {
   const url = resolvePollUrl(baseUrl, pollUrl)
-  const maxWaitMs = 300000
+  const startedAt = Date.now()
   let intervalMs = Math.max(1000, Math.min(pollAfterMs || 3000, 10000))
-  const start = Date.now()
   let pollCount = 0
-  while (Date.now() - start < maxWaitMs) {
+  let pausedSince = 0
+  let sawUncertain = false
+
+  while (true) {
+    const elapsedMs = Date.now() - startedAt
+    const budget = pollBudgetMs({ baseMs: defaultPollBudgetMs, uncertainMs: uncertainPollBudgetMs, sawUncertain })
+    const decision = evaluatePollState({ elapsedMs, budgetMs: budget, pausedMs: pausedSince ? Date.now() - pausedSince : 0, pausedGraceMs: pausedPollGraceMs })
+    if (decision.stop) {
+      if (decision.reason === 'paused') throw new Error(`上游任务已暂停超过 ${formatWaitMs(pausedPollGraceMs)}，请稍后重试`)
+      throw new Error(sawUncertain
+        ? `上游任务状态不确定，已等待 ${formatWaitMs(elapsedMs)} 仍未确认结果，请稍后在服务商后台核对`
+        : `上游任务处理超时（已等待 ${formatWaitMs(elapsedMs)}），请降低尺寸或质量后重试`)
+    }
+
     await sleep(intervalMs)
     pollCount += 1
-    onStatus({ type: 'poll', pollCount, status: 'running', baseUrl })
+    onStatus({ type: 'poll', pollCount, status: 'running', baseUrl, elapsedMs, budgetMs: budget })
     const response = await fetch(url, {
       headers: { Authorization: `Bearer ${apiKey}` },
       signal: AbortSignal.timeout(60000)
@@ -149,13 +181,22 @@ async function pollAsyncTask({ baseUrl, apiKey, pollUrl, pollAfterMs = 3000, onS
     }
     if (data?.poll_after_ms) intervalMs = Math.max(1000, Math.min(data.poll_after_ms, 10000))
     const status = data?.status
-    onStatus({ type: 'poll-result', pollCount, status: status || 'processing', baseUrl })
+    if (status === 'paused') pausedSince = pausedSince || Date.now()
+    else pausedSince = 0
+    if (status === 'uncertain' || status === 'client_disconnected') sawUncertain = true
+    onStatus({
+      type: 'poll-result',
+      pollCount,
+      status: status || 'processing',
+      baseUrl,
+      elapsedMs: Date.now() - startedAt,
+      budgetMs: pollBudgetMs({ baseMs: defaultPollBudgetMs, uncertainMs: uncertainPollBudgetMs, sawUncertain })
+    })
     if (isCompletedImageTask(data) || status === 'succeeded' || status === 'completed' || status === 'success') return data
     if (terminalFailureStatuses.has(status)) {
       throw new Error(data?.error?.message || data?.message || `上游任务${upstreamStatusLabel(status)}`)
     }
   }
-  throw new Error('上游任务处理超时，请降低质量/尺寸后重试')
 }
 
 export async function callImageApi({ baseUrl, apiKey, endpoint, payload, onStatus = () => {} }) {

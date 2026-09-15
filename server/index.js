@@ -10,7 +10,7 @@ import { requireAuth, signToken } from './auth.js'
 import { completeJob, createJob, failJob, getJob, updateJob } from './jobs.js'
 import { buildReferencePayload, maxReferenceImageBytes, validateReferenceFiles } from './reference.js'
 import { findImageTarget, legacyChannels, normalizeChannels, publicChannels } from './settings.js'
-import { assertEnum, callImageApiWithRetry, extractImageItems, formats, qualities, saveImage, upstreamStatusLabel } from './utils.js'
+import { assertEnum, callImageApiWithRetry, extractImageItems, formats, formatWaitMs, qualities, saveImage, upstreamStatusLabel } from './utils.js'
 import { optimizePrompt } from './prompt-optimizer.js'
 
 const batchConcurrency = 1
@@ -145,13 +145,18 @@ async function updateJobHistory(job, fields) {
   })
 }
 
+function waitSuffix(status) {
+  if (!status?.budgetMs) return ''
+  return ` · 已等待 ${formatWaitMs(status.elapsedMs || 0)} / 上限 ${formatWaitMs(status.budgetMs)}`
+}
+
 function reportJobStatus(job, status) {
   let fields = {}
   if (status.type === 'attempt') fields = { phase: 'calling', progressText: `正在调用 ${status.baseUrl}，第 ${status.attempt}/${status.max} 次`, attempt: status.attempt, maxAttempts: status.max, baseUrl: status.baseUrl }
   if (status.type === 'retry') fields = { phase: 'retry', progressText: `调用失败，等待后进行第 ${status.nextAttempt}/${status.max} 次尝试`, attempt: status.attempt, maxAttempts: status.max, baseUrl: status.baseUrl }
   if (status.type === 'accepted') fields = { phase: 'accepted', progressText: '上游已接受任务，等待处理', baseUrl: status.baseUrl }
-  if (status.type === 'poll') fields = { phase: 'polling', progressText: `正在第 ${status.pollCount} 次查询上游任务`, pollCount: status.pollCount, baseUrl: status.baseUrl }
-  if (status.type === 'poll-result') fields = { phase: 'polling', progressText: `第 ${status.pollCount} 次查询：${upstreamStatusLabel(status.status)}`, pollCount: status.pollCount, baseUrl: status.baseUrl }
+  if (status.type === 'poll') fields = { phase: 'polling', progressText: `正在第 ${status.pollCount} 次查询上游任务${waitSuffix(status)}`, pollCount: status.pollCount, baseUrl: status.baseUrl }
+  if (status.type === 'poll-result') fields = { phase: 'polling', progressText: `第 ${status.pollCount} 次查询：${upstreamStatusLabel(status.status)}${waitSuffix(status)}`, pollCount: status.pollCount, baseUrl: status.baseUrl }
   if (!Object.keys(fields).length) return
   updateJob(job.id, fields)
   void updateJobHistory(job, { phase: fields.phase, progress_text: fields.progressText, attempt: fields.attempt, poll_count: fields.pollCount, base_url: fields.baseUrl }).catch(() => {})
@@ -318,8 +323,8 @@ app.post('/api/images/edit/batch', requireAuth, upload.array('files', 20), async
           const data = await callImageApiWithRetry({ baseUrl: settings.base_url || defaultBaseUrl, apiKey: settings.api_key, endpoint: '/images/edits', payload: { model: settings.model, prompt, images: [{ image_url: imageUrl }], size, quality } }, 2, (status) => {
             if (status.type === 'attempt') job.results[index].progressText = `调用 ${status.baseUrl}，第 ${status.attempt}/${status.max} 次`
             if (status.type === 'retry') job.results[index].progressText = `${status.baseUrl} 超时/失败，8秒后重试第 ${status.nextAttempt}/${status.max} 次`
-            if (status.type === 'poll') job.results[index].progressText = `正在第 ${status.pollCount} 次查询上游任务`
-            if (status.type === 'poll-result') job.results[index].progressText = `第 ${status.pollCount} 次查询：${upstreamStatusLabel(status.status)}`
+            if (status.type === 'poll') job.results[index].progressText = `正在第 ${status.pollCount} 次查询上游任务${waitSuffix(status)}`
+            if (status.type === 'poll-result') job.results[index].progressText = `第 ${status.pollCount} 次查询：${upstreamStatusLabel(status.status)}${waitSuffix(status)}`
             const progress = job.results[index].progressText
             void withDb((data) => {
               const record = data.edits.find((entry) => entry.id === recordId)
