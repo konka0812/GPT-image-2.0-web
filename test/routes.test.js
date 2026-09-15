@@ -32,3 +32,22 @@ test('server uses the primary provider as its default without a cross-provider f
   assert.doesNotMatch(source, /hk\.testvideo\.site/)
   assert.doesNotMatch(source, /callWithFallback/)
 })
+
+test('server exposes sanitized model channels for pickers', async () => {
+  const source = await fs.readFile(new URL('../server/index.js', import.meta.url), 'utf8')
+  assert.match(source, /app\.get\('\/api\/model-channels'/)
+  assert.match(source, /publicChannels/)
+})
+
+test('generation endpoints resolve the selected channel, group and model', async () => {
+  const source = await fs.readFile(new URL('../server/index.js', import.meta.url), 'utf8')
+  assert.match(source, /getImageTarget\(req\.user\.id, req\.body\)/)
+  assert.match(source, /resolveSize\(req\.body\.size, settings\.sizes\)/)
+  assert.match(source, /当前模型不支持所选尺寸/)
+})
+
+test('settings POST validates image channels', async () => {
+  const source = await fs.readFile(new URL('../server/index.js', import.meta.url), 'utf8')
+  assert.match(source, /normalizeChannels\(req\.body\.image_channels\)/)
+  assert.match(source, /请至少配置一个完整通道/)
+})

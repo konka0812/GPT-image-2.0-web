@@ -4,11 +4,15 @@
       <h1 class="text-2xl font-black">AI 生图</h1>
       <p class="mt-2 text-sm text-slate-400">输入提示词生成图片</p>
       <div class="mt-6 flex min-h-0 flex-1 flex-col space-y-4">
+        <select v-model="selectedKey" class="field shrink-0">
+          <option v-if="!targetOptions.length" value="">未配置图片通道，请先到设置页添加</option>
+          <option v-for="option in targetOptions" :key="option.key" :value="option.key">{{ option.label }}</option>
+        </select>
         <div class="relative flex min-h-0 flex-1 flex-col">
           <textarea v-model="form.prompt" class="field min-h-0 flex-1 resize-none pr-10" placeholder="一只橘猫坐在赛博朋克霓虹街道上，旁边有「深夜食堂」招牌，中文清晰可读" />
           <PromptOptimizer v-model="form.prompt" type="generate" />
         </div>
-        <select v-model="form.size" class="field"><option v-for="option in sizeOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select>
+        <select v-model="form.size" class="field"><option v-for="option in availableSizeOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select>
         <div class="grid grid-cols-3 gap-3">
           <select v-model="form.quality" class="field"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select>
           <select v-model="form.output_format" class="field"><option value="png">png</option><option value="jpeg">jpeg</option><option value="webp">webp</option></select>
@@ -42,14 +46,20 @@
 
 <script setup>
 import axios from 'axios'
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import TaskStatus from '../components/TaskStatus.vue'
 import PromptOptimizer from '../components/PromptOptimizer.vue'
-import { sizeOptions } from '../image-sizes.js'
+import { selectionPayload } from '../model-channels.js'
+import { useModelChannels } from '../use-model-channels.js'
 import { useImageTask } from '../use-image-task.js'
 
 const form = ref({ prompt: '', size: '3840x2160', quality: 'high', output_format: 'png', n: 1 })
+const { options: targetOptions, selectedKey, availableSizeOptions } = useModelChannels()
 const { job, images, error, notice, submitting, loading, busy, elapsed, queryCount, start } = useImageTask('generate')
+
+watch(availableSizeOptions, (list) => {
+  if (list.length && !list.some((option) => option.value === form.value.size)) form.value.size = list[0].value
+})
 
 async function generate() {
   error.value = ''
@@ -57,7 +67,7 @@ async function generate() {
   submitting.value = true
   notice.value = '正在提交任务，请勿重复点击'
   try {
-    const { data } = await axios.post('/api/images/generate', form.value)
+    const { data } = await axios.post('/api/images/generate', { ...form.value, ...selectionPayload(selectedKey.value) })
     await start(data.jobId)
   } catch (e) {
     error.value = e.response?.data?.error || e.message

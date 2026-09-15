@@ -10,6 +10,10 @@
       </div>
 
       <div class="mt-5 flex min-h-0 flex-1 flex-col gap-4">
+        <select v-model="selectedKey" class="field shrink-0">
+          <option v-if="!targetOptions.length" value="">未配置图片通道，请先到设置页添加</option>
+          <option v-for="option in targetOptions" :key="option.key" :value="option.key">{{ option.label }}</option>
+        </select>
         <input class="field shrink-0" type="file" accept="image/*" multiple @change="onFiles" />
 
         <div class="shrink-0 rounded-2xl border border-cyan-400/20 bg-cyan-500/10 p-3 text-xs leading-5 text-cyan-100">
@@ -48,7 +52,7 @@
           <textarea v-model="form.prompt" class="field min-h-24 flex-1 resize-none pr-10" placeholder="例如：Image 1 作为背景，把 Image 2 的人物放在左侧，Image 3 的商品放在右下角，统一光影和透视" />
           <PromptOptimizer v-model="form.prompt" type="reference" />
         </div>
-        <select v-model="form.size" class="field shrink-0"><option v-for="option in sizeOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select>
+        <select v-model="form.size" class="field shrink-0"><option v-for="option in availableSizeOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select>
         <div class="grid shrink-0 grid-cols-2 gap-3">
           <select v-model="form.quality" class="field"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select>
           <select v-model="form.output_format" class="field"><option value="png">png</option><option value="jpeg">jpeg</option><option value="webp">webp</option></select>
@@ -73,17 +77,23 @@
 
 <script setup>
 import axios from 'axios'
-import { onBeforeUnmount, ref } from 'vue'
+import { onBeforeUnmount, ref, watch } from 'vue'
 import { appendReferenceFiles, maxReferenceImages, moveReferenceFile, removeReferenceFile } from '../reference-images.js'
 import TaskStatus from '../components/TaskStatus.vue'
 import PromptOptimizer from '../components/PromptOptimizer.vue'
-import { sizeOptions } from '../image-sizes.js'
+import { appendSelection } from '../model-channels.js'
+import { useModelChannels } from '../use-model-channels.js'
 import { useImageTask } from '../use-image-task.js'
 
 const form = ref({ prompt: '', size: '3840x2160', quality: 'high', output_format: 'png' })
+const { options: targetOptions, selectedKey, availableSizeOptions } = useModelChannels()
 const items = ref([])
 const { job, images, error, notice, submitting, loading, busy, elapsed, queryCount, start } = useImageTask('reference')
 const dragIndex = ref(-1)
+
+watch(availableSizeOptions, (list) => {
+  if (list.length && !list.some((option) => option.value === form.value.size)) form.value.size = list[0].value
+})
 
 function onFiles(event) {
   const incoming = Array.from(event.target.files || [])
@@ -134,6 +144,7 @@ async function generate() {
     const data = new FormData()
     items.value.forEach((item) => data.append('files', item.file))
     Object.entries(form.value).forEach(([key, value]) => data.append(key, value))
+    appendSelection(data, selectedKey.value)
     const response = await axios.post('/api/images/reference', data)
     await start(response.data.jobId)
   } catch (requestError) {
