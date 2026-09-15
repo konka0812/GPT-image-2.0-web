@@ -113,3 +113,12 @@ test('settings page scrolls, is wider and confirms saves with a dialog', async (
   assert.match(source, /保存成功/)
   assert.match(source, /savedVisible/)
 })
+
+test('settings page requires edit mode before changes', async () => {
+  const source = await fs.readFile(new URL('../src/views/Settings.vue', import.meta.url), 'utf8')
+  assert.match(source, /编辑配置/)
+  assert.match(source, /startEdit/)
+  assert.match(source, /cancelEdit/)
+  assert.match(source, /v-if="!editing"/)
+  assert.match(source, /maskKey/)
+})
