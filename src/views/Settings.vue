@@ -55,6 +55,22 @@
           <p v-else class="text-slate-400">未配置文本模型，提示词优化暂不可用</p>
         </div>
       </section>
+      <section class="border-t border-white/10 pt-6">
+        <h2 class="text-lg font-bold text-slate-200">维护</h2>
+        <p class="mt-1 text-xs text-slate-500">删除历史记录时会同时删除对应图片；如仍有残留，可在这里清理没有被任何记录引用的图片</p>
+        <div class="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4">
+          <p v-if="stats" class="text-sm leading-6 text-slate-300">
+            图片文件：{{ stats.totalFiles }} 个 · 占用 {{ formatBytes(stats.totalBytes) }}<br />
+            <span :class="stats.orphanFiles ? 'text-amber-300' : 'text-slate-500'">无用文件：{{ stats.orphanFiles }} 个 · {{ formatBytes(stats.orphanBytes) }}</span>
+          </p>
+          <p v-else class="text-sm text-slate-400">正在读取磁盘占用…</p>
+          <button
+            class="mt-3 rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-2 text-sm text-amber-200 disabled:opacity-40"
+            :disabled="cleaning || !stats || !stats.orphanFiles"
+            @click="cleanupImages"
+          >{{ cleaning ? '清理中...' : '清理无用图片' }}</button>
+        </div>
+      </section>
     </div>
 
     <div v-else class="mt-8 space-y-6">
@@ -126,7 +142,7 @@
       <p v-if="error" class="rounded-xl bg-red-500/15 p-3 text-sm text-red-200">{{ error }}</p>
     </div>
 
-    <div v-if="savedVisible" class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-6 backdrop-blur-sm" @click="savedVisible = false">
+    <div v-if="dialog" class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-6 backdrop-blur-sm" @click="dialog = null">
       <div class="save-dialog w-full max-w-md overflow-hidden rounded-3xl border border-emerald-400/25 bg-slate-900 shadow-2xl" @click.stop>
         <div class="bg-gradient-to-b from-emerald-500/20 to-transparent px-8 pb-4 pt-8 text-center">
           <div class="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500/15 ring-1 ring-emerald-400/40">
@@ -134,11 +150,11 @@
               <path d="M20 6 9 17l-5-5" />
             </svg>
           </div>
-          <h3 class="mt-5 text-xl font-black text-white">保存成功</h3>
-          <p class="mt-2 text-sm leading-6 text-slate-400">配置已更新<br />生图页可直接选择新的通道</p>
+          <h3 class="mt-5 text-xl font-black text-white">{{ dialog.title }}</h3>
+          <p class="mt-2 whitespace-pre-line text-sm leading-6 text-slate-400">{{ dialog.message }}</p>
         </div>
         <div class="px-8 pb-8 pt-2">
-          <button class="btn btn-primary w-full" @click="savedVisible = false">知道了</button>
+          <button class="btn btn-primary w-full" @click="dialog = null">知道了</button>
         </div>
       </div>
     </div>
@@ -153,8 +169,45 @@ import { formatPixels, sizeCatalog, tierOrder } from '../image-sizes.js'
 const form = ref({ image_channels: [], text_model: '', text_base_url: '', text_api_key: '' })
 const editing = ref(false)
 const loading = ref(false)
-const savedVisible = ref(false)
+const dialog = ref(null)
+const stats = ref(null)
+const cleaning = ref(false)
 const error = ref('')
+
+function showDialog(title, message) {
+  dialog.value = { title, message }
+}
+
+function formatBytes(bytes) {
+  const value = Number(bytes) || 0
+  if (value < 1024) return `${value}B`
+  if (value < 1048576) return `${(value / 1024).toFixed(0)}KB`
+  if (value < 1073741824) return `${(value / 1048576).toFixed(1)}MB`
+  return `${(value / 1073741824).toFixed(2)}GB`
+}
+
+async function loadStats() {
+  try {
+    const { data } = await axios.get('/api/maintenance/image-stats')
+    stats.value = data
+  } catch {
+    stats.value = null
+  }
+}
+
+async function cleanupImages() {
+  if (!confirm('确定清理没有被任何历史记录引用的图片吗？此操作不可撤销。')) return
+  cleaning.value = true
+  try {
+    const { data } = await axios.post('/api/maintenance/cleanup-images')
+    await loadStats()
+    showDialog('清理完成', `已删除 ${data.deleted} 个文件\n释放 ${formatBytes(data.freedBytes)} 空间`)
+  } catch (e) {
+    showDialog('清理失败', e.response?.data?.error || e.message)
+  } finally {
+    cleaning.value = false
+  }
+}
 
 function makeId(prefix) {
   return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`
@@ -266,7 +319,7 @@ async function save() {
   try {
     await axios.post('/api/settings', form.value)
     editing.value = false
-    savedVisible.value = true
+    showDialog('保存成功', '配置已更新\n生图页可直接选择新的通道')
   } catch (e) {
     error.value = e.response?.data?.error || e.message
   } finally {
@@ -274,7 +327,10 @@ async function save() {
   }
 }
 
-onMounted(load)
+onMounted(async () => {
+  await load()
+  await loadStats()
+})
 </script>
 
 <style scoped>

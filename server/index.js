@@ -11,6 +11,7 @@ import { completeJob, createJob, failJob, getJob, updateJob } from './jobs.js'
 import { buildReferencePayload, maxReferenceImageBytes, validateReferenceFiles } from './reference.js'
 import { findImageTarget, legacyChannels, normalizeChannels, publicChannels } from './settings.js'
 import { assertEnum, callImageApiWithRetry, extractImageItems, formats, formatWaitMs, qualities, saveImage, upstreamStatusLabel } from './utils.js'
+import { cleanupOrphans, collectImageNames, imageStats, removeImages } from './maintenance.js'
 import { optimizePrompt } from './prompt-optimizer.js'
 
 const batchConcurrency = 1
@@ -132,6 +133,38 @@ function resolveSize(requested, allowed) {
   if (!value) return allowed[0]
   return allowed.includes(value) ? value : null
 }
+
+function uploadDir() {
+  return process.env.UPLOAD_DIR || path.join(rootDir, 'uploads')
+}
+
+async function referencedImageNames() {
+  return viewDb((data) => collectImageNames([...data.generations, ...data.edits]))
+}
+
+async function removeUnreferencedImages(names) {
+  const referenced = await referencedImageNames()
+  const targets = [...names].filter((name) => !referenced.has(name))
+  return targets.length ? removeImages(uploadDir(), targets) : { deleted: 0, freedBytes: 0 }
+}
+
+app.get('/api/maintenance/image-stats', requireAuth, async (req, res) => {
+  try {
+    const referenced = await referencedImageNames()
+    res.json(imageStats(uploadDir(), referenced))
+  } catch (error) {
+    res.status(500).json({ error: error.message })
+  }
+})
+
+app.post('/api/maintenance/cleanup-images', requireAuth, async (req, res) => {
+  try {
+    const referenced = await referencedImageNames()
+    res.json(cleanupOrphans(uploadDir(), referenced))
+  } catch (error) {
+    res.status(500).json({ error: error.message })
+  }
+})
 
 function historyRecord(data, kind, recordId) {
   const records = kind === 'generate' ? data.generations : data.edits
@@ -386,23 +419,28 @@ app.get('/api/history', requireAuth, async (req, res) => {
 })
 
 app.delete('/api/history', requireAuth, async (req, res) => {
+  let removed = []
   await withDb((data) => {
+    removed = [...data.generations, ...data.edits].filter((r) => r.user_id === req.user.id)
     data.generations = data.generations.filter((r) => r.user_id !== req.user.id)
     data.edits = data.edits.filter((r) => r.user_id !== req.user.id)
   })
-  res.json({ ok: true })
+  const result = await removeUnreferencedImages(collectImageNames(removed))
+  res.json({ ok: true, imagesRemoved: result.deleted })
 })
 
 app.delete('/api/history/:kind/:id', requireAuth, async (req, res) => {
   const kind = req.params.kind
   const id = Number(req.params.id)
   if (kind !== 'generation' && kind !== 'edit') return res.status(400).json({ error: '类型错误' })
+  let removed = []
   await withDb((data) => {
     const records = kind === 'generation' ? data.generations : data.edits
     const index = records.findIndex((r) => r.id === id && r.user_id === req.user.id)
-    if (index >= 0) records.splice(index, 1)
+    if (index >= 0) removed = records.splice(index, 1)
   })
-  res.json({ ok: true })
+  const result = await removeUnreferencedImages(collectImageNames(removed))
+  res.json({ ok: true, imagesRemoved: result.deleted })
 })
 
 app.use(express.static(path.join(rootDir, 'dist')))
