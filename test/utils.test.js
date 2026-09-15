@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { resolvePollUrl, extractImageItems, isCompletedImageTask, resolveImageSource, resolveAssetUrl, sameSite, upstreamStatusLabel } from '../server/utils.js'
+import { resolvePollUrl, extractImageItems, isCompletedImageTask, resolveImageSource, resolveAssetUrl, sameSite, upstreamStatusLabel, pollBudgetMs, evaluatePollState, formatWaitMs } from '../server/utils.js'
 
 test('resolvePollUrl resolves root-relative task URLs against the origin', () => {
   assert.equal(
@@ -72,4 +72,22 @@ test('upstreamStatusLabel translates platform statuses', () => {
   assert.equal(upstreamStatusLabel('canceled'), '已取消')
   assert.equal(upstreamStatusLabel('paused'), '已暂停，等待恢复')
   assert.equal(upstreamStatusLabel('mystery'), 'mystery')
+})
+
+test('pollBudgetMs widens the deadline after uncertain statuses', () => {
+  assert.equal(pollBudgetMs({ baseMs: 900000, uncertainMs: 1200000, sawUncertain: false }), 900000)
+  assert.equal(pollBudgetMs({ baseMs: 900000, uncertainMs: 1200000, sawUncertain: true }), 1200000)
+})
+
+test('evaluatePollState stops on timeout and paused grace', () => {
+  assert.deepEqual(evaluatePollState({ elapsedMs: 100, budgetMs: 1000, pausedMs: 0, pausedGraceMs: 100 }), { stop: false, reason: '' })
+  assert.deepEqual(evaluatePollState({ elapsedMs: 1000, budgetMs: 1000, pausedMs: 0, pausedGraceMs: 100 }), { stop: true, reason: 'timeout' })
+  assert.deepEqual(evaluatePollState({ elapsedMs: 10, budgetMs: 1000, pausedMs: 150, pausedGraceMs: 100 }), { stop: true, reason: 'paused' })
+  assert.deepEqual(evaluatePollState({ elapsedMs: 10, budgetMs: 1000, pausedMs: 50, pausedGraceMs: 100 }), { stop: false, reason: '' })
+})
+
+test('formatWaitMs renders short human readable waits', () => {
+  assert.equal(formatWaitMs(45000), '45秒')
+  assert.equal(formatWaitMs(150000), '2分30秒')
+  assert.equal(formatWaitMs(900000), '15分00秒')
 })
