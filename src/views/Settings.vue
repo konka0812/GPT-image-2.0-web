@@ -1,5 +1,5 @@
 <template>
-  <div class="card mx-auto max-w-3xl rounded-3xl p-8">
+  <div class="card mx-auto h-full max-w-6xl overflow-y-auto rounded-3xl p-8">
     <h1 class="text-2xl font-black">设置</h1>
     <p class="mt-2 text-sm text-slate-400">每个用户单独保存自己的 API 配置</p>
     <div class="mt-8 space-y-6">
@@ -62,8 +62,14 @@
       </section>
 
       <button class="btn btn-primary w-full" :disabled="loading" @click="save">{{ loading ? '保存中...' : '保存设置' }}</button>
-      <p v-if="message" class="rounded-xl bg-emerald-500/15 p-3 text-sm text-emerald-200">{{ message }}</p>
       <p v-if="error" class="rounded-xl bg-red-500/15 p-3 text-sm text-red-200">{{ error }}</p>
+    </div>
+    <div v-if="savedVisible" class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6" @click="savedVisible = false">
+      <div class="w-full max-w-sm rounded-2xl border border-white/10 bg-slate-900 p-6 text-center" @click.stop>
+        <p class="text-lg font-bold text-emerald-300">保存成功</p>
+        <p class="mt-2 text-sm text-slate-400">配置已更新，生图页可直接选择新的通道</p>
+        <button class="btn btn-primary mt-5 w-full" @click="savedVisible = false">知道了</button>
+      </div>
     </div>
   </div>
 </template>
@@ -75,7 +81,7 @@ import { sizeOptions } from '../image-sizes.js'
 
 const form = ref({ image_channels: [], text_model: '', text_base_url: '', text_api_key: '' })
 const loading = ref(false)
-const message = ref('')
+const savedVisible = ref(false)
 const error = ref('')
 
 function makeId(prefix) {
@@ -151,7 +157,6 @@ onMounted(async () => {
 })
 
 async function save() {
-  message.value = ''
   error.value = ''
   const problem = validate()
   if (problem) {
@@ -161,7 +166,7 @@ async function save() {
   loading.value = true
   try {
     await axios.post('/api/settings', form.value)
-    message.value = '已保存'
+    savedVisible.value = true
   } catch (e) {
     error.value = e.response?.data?.error || e.message
   } finally {
