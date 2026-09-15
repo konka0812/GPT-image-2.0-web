@@ -1,7 +1,7 @@
 import fs from 'fs/promises'
 import path from 'path'
 
-export const sizes = ['1024x1024', '1536x1024', '1024x1536', '2048x2048', '2160x3840', '3840x2160']
+export const sizes = ['1024x1024', '1536x1024', '1024x1536', '2048x2048', '2160x3840', '3840x2160', '2880x2160', '2160x2880', '3520x2336', '2336x3520']
 export const qualities = ['low', 'medium', 'high']
 export const formats = ['png', 'jpeg', 'webp']
 
