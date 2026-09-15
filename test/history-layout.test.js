@@ -36,3 +36,9 @@ test('history cards show the channel, group and model used', async () => {
   assert.match(card, /group_name/)
   assert.match(card, /model_name/)
 })
+
+test('history cards mark cleaned images', async () => {
+  const card = await fs.readFile(new URL('../src/components/RecordCard.vue', import.meta.url), 'utf8')
+  assert.match(card, /images_cleared_at/)
+  assert.match(card, /图片已清理/)
+})
