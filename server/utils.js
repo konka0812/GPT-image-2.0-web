@@ -19,23 +19,83 @@ export async function saveBase64Image(b64, format = 'png') {
   return `/uploads/${name}`
 }
 
-export async function saveImage(item, format = 'png') {
-  if (item.b64_json) {
-    return saveBase64Image(item.b64_json, format)
+const upstreamStatusLabels = {
+  queued: '排队中',
+  dispatching: '调度中',
+  running: '处理中',
+  processing: '处理中',
+  success: '已完成',
+  succeeded: '已完成',
+  completed: '已完成',
+  failed: '已失败',
+  error: '出错',
+  rejected: '被拒绝',
+  uncertain: '状态不确定，继续查询',
+  client_disconnected: '客户端断开，继续查询',
+  paused: '已暂停，等待恢复',
+  canceled: '已取消',
+  cancelled: '已取消'
+}
+
+const terminalFailureStatuses = new Set(['failed', 'error', 'rejected', 'canceled', 'cancelled'])
+
+export function upstreamStatusLabel(status) {
+  return upstreamStatusLabels[status] || status || ''
+}
+
+export function extractImageItems(payload) {
+  if (!payload || typeof payload !== 'object') return []
+  const candidates = []
+  if (Array.isArray(payload.data)) candidates.push(...payload.data)
+  if (Array.isArray(payload.assets)) candidates.push(...payload.assets)
+  if (Array.isArray(payload.summary?.assets)) candidates.push(...payload.summary.assets)
+  return candidates.filter((item) => item && (item.b64_json || item.signed_url || item.url || item.download_url))
+}
+
+export function resolveImageSource(item) {
+  if (!item || typeof item !== 'object') return null
+  if (item.b64_json) return { type: 'base64', data: item.b64_json }
+  if (item.signed_url) return { type: 'url', url: item.signed_url, signed: true }
+  const url = item.url || item.download_url
+  if (url) return { type: 'url', url, signed: false }
+  return null
+}
+
+export function sameSite(url, baseUrl) {
+  try {
+    const site = (value) => new URL(value).hostname.split('.').slice(-2).join('.')
+    return site(url) === site(baseUrl)
+  } catch {
+    return false
   }
-  if (item.url) {
-    const safeFormat = assertEnum(format, formats, 'png')
-    const dir = process.env.UPLOAD_DIR || 'uploads'
-    await fs.mkdir(dir, { recursive: true })
-    const name = `${Date.now()}-${Math.random().toString(16).slice(2)}.${safeFormat}`
-    const file = path.join(dir, name)
-    const response = await fetch(item.url)
-    if (!response.ok) throw new Error(`下载图片失败: HTTP ${response.status}`)
-    const buffer = Buffer.from(await response.arrayBuffer())
-    await fs.writeFile(file, buffer)
-    return `/uploads/${name}`
+}
+
+async function downloadImage(url, { apiKey, baseUrl, signed }) {
+  const attempts = []
+  if (!signed && apiKey && sameSite(url, baseUrl)) attempts.push({ Authorization: `Bearer ${apiKey}` })
+  attempts.push(null)
+  let lastError
+  for (const headers of attempts) {
+    const response = await fetch(url, headers ? { headers } : {})
+    if (response.ok) return Buffer.from(await response.arrayBuffer())
+    lastError = new Error(`下载图片失败: HTTP ${response.status}`)
+    if (response.status !== 401 && response.status !== 403) throw lastError
   }
-  throw new Error('上游返回的图片数据格式未知')
+  throw lastError
+}
+
+export async function saveImage(item, format = 'png', options = {}) {
+  const source = resolveImageSource(item)
+  if (!source) throw new Error('上游返回的图片数据格式未知')
+  if (source.type === 'base64') return saveBase64Image(source.data, format)
+  const safeFormat = assertEnum(format, formats, 'png')
+  const dir = process.env.UPLOAD_DIR || 'uploads'
+  await fs.mkdir(dir, { recursive: true })
+  const name = `${Date.now()}-${Math.random().toString(16).slice(2)}.${safeFormat}`
+  const file = path.join(dir, name)
+  const buffer = await downloadImage(source.url, { apiKey: options.apiKey, baseUrl: options.baseUrl, signed: source.signed })
+  await fs.writeFile(file, buffer)
+  return `/uploads/${name}`
 }
 
 function sleep(ms) {
@@ -52,14 +112,14 @@ export function resolvePollUrl(baseUrl, pollUrl) {
   return new URL(pollUrl, `${new URL(baseUrl).origin}/`).toString()
 }
 
-export function isCompletedImageTask(data) {
-  return Array.isArray(data?.data) && data.data.some((item) => item?.b64_json || item?.url)
+export function isCompletedImageTask(payload) {
+  return extractImageItems(payload).length > 0
 }
 
 async function pollAsyncTask({ baseUrl, apiKey, pollUrl, pollAfterMs = 3000, onStatus = () => {} }) {
   const url = resolvePollUrl(baseUrl, pollUrl)
   const maxWaitMs = 300000
-  const intervalMs = Math.max(1000, Math.min(pollAfterMs || 3000, 10000))
+  let intervalMs = Math.max(1000, Math.min(pollAfterMs || 3000, 10000))
   const start = Date.now()
   let pollCount = 0
   while (Date.now() - start < maxWaitMs) {
@@ -77,11 +137,12 @@ async function pollAsyncTask({ baseUrl, apiKey, pollUrl, pollAfterMs = 3000, onS
       const message = data?.error?.message || data?.message || `HTTP ${response.status}`
       throw new Error(typeof message === 'string' ? message.slice(0, 300) : JSON.stringify(message))
     }
+    if (data?.poll_after_ms) intervalMs = Math.max(1000, Math.min(data.poll_after_ms, 10000))
     const status = data?.status
     onStatus({ type: 'poll-result', pollCount, status: status || 'processing', baseUrl })
     if (isCompletedImageTask(data) || status === 'succeeded' || status === 'completed' || status === 'success') return data
-    if (status === 'failed' || status === 'error' || status === 'rejected') {
-      throw new Error(data?.message || data?.error?.message || '上游任务失败')
+    if (terminalFailureStatuses.has(status)) {
+      throw new Error(data?.error?.message || data?.message || `上游任务${upstreamStatusLabel(status)}`)
     }
   }
   throw new Error('上游任务处理超时，请降低质量/尺寸后重试')
