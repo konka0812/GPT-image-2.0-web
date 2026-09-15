@@ -4,6 +4,10 @@
       <h1 class="text-2xl font-black">批量改图</h1>
       <p class="mt-2 text-sm text-slate-400">一次上传多张图片，使用同一个提示词并发处理</p>
       <div class="mt-6 flex min-h-0 flex-1 flex-col space-y-4">
+        <select v-model="selectedKey" class="field">
+          <option v-if="!targetOptions.length" value="">未配置图片通道，请先到设置页添加</option>
+          <option v-for="option in targetOptions" :key="option.key" :value="option.key">{{ option.label }}</option>
+        </select>
         <input class="field" type="file" accept="image/*" multiple :disabled="loading" @change="onFiles" />
         <div class="rounded-2xl border border-white/10 bg-black/20 p-3 text-sm text-slate-300">已选择 {{ files.length }} 张图片</div>
         <div v-if="jobId" class="rounded-2xl border border-cyan-400/20 bg-cyan-500/10 p-4">
@@ -20,7 +24,7 @@
           <textarea v-model="form.prompt" class="field min-h-0 flex-1 resize-none pr-10" placeholder="把背景换成纯白色，保持商品主体不变，添加柔和底部阴影" />
           <PromptOptimizer v-model="form.prompt" type="batch" />
         </div>
-        <select v-model="form.size" class="field"><option v-for="option in sizeOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select>
+        <select v-model="form.size" class="field"><option v-for="option in availableSizeOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select>
         <div class="grid grid-cols-2 gap-3">
           <select v-model="form.quality" class="field"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select>
           <select v-model="form.output_format" class="field"><option value="png">png</option><option value="jpeg">jpeg</option><option value="webp">webp</option></select>
@@ -68,13 +72,19 @@
 <script setup>
 import axios from 'axios'
 import JSZip from 'jszip'
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { taskStorageKey } from '../task-feedback.js'
 import PromptOptimizer from '../components/PromptOptimizer.vue'
-import { sizeOptions } from '../image-sizes.js'
+import { appendSelection } from '../model-channels.js'
+import { useModelChannels } from '../use-model-channels.js'
 
 const form = ref({ prompt: '', size: '3840x2160', quality: 'high', output_format: 'png' })
+const { options: targetOptions, selectedKey, availableSizeOptions } = useModelChannels()
 const files = ref([])
+
+watch(availableSizeOptions, (list) => {
+  if (list.length && !list.some((option) => option.value === form.value.size)) form.value.size = list[0].value
+})
 const results = ref([])
 const selected = ref([])
 const preview = ref('')
@@ -166,6 +176,7 @@ async function edit(targetFiles = files.value) {
     if (!targetFiles.length) throw new Error('请先上传图片文件')
     const data = new FormData()
     Object.entries(form.value).forEach(([k, v]) => data.append(k, v))
+    appendSelection(data, selectedKey.value)
     targetFiles.forEach((file) => data.append('files', file))
     const res = await axios.post('/api/images/edit/batch', data)
     jobId.value = res.data.jobId

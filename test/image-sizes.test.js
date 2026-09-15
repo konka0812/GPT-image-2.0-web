@@ -31,10 +31,8 @@ test('server validates all supported sizes', () => {
   for (const size of expectedSizes) assert.ok(sizes.includes(size), `server missing ${size}`)
 })
 
-test('generation views render labeled size options', async () => {
-  for (const name of ['Generate.vue', 'EditImage.vue', 'ReferenceGenerate.vue', 'BatchEdit.vue']) {
-    const source = await fs.readFile(new URL(`../src/views/${name}`, import.meta.url), 'utf8')
-    assert.match(source, /from '\.\.\/image-sizes\.js'/, `${name} should import shared size options`)
-    assert.match(source, /sizeOptions/, `${name} should render sizeOptions`)
-  }
+test('size catalog feeds the model channel composable', async () => {
+  const composable = await fs.readFile(new URL('../src/use-model-channels.js', import.meta.url), 'utf8')
+  assert.match(composable, /from '\.\/image-sizes\.js'/)
+  assert.match(composable, /filterSizeOptions/)
 })

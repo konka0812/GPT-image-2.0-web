@@ -9,8 +9,8 @@ import { viewDb, withDb } from './db.js'
 import { requireAuth, signToken } from './auth.js'
 import { completeJob, createJob, failJob, getJob, updateJob } from './jobs.js'
 import { buildReferencePayload, maxReferenceImageBytes, validateReferenceFiles } from './reference.js'
-import { defaultModel, normalizeModel, requireModel } from './settings.js'
-import { assertEnum, callImageApiWithRetry, formats, qualities, saveImage, sizes } from './utils.js'
+import { findImageTarget, legacyChannels, normalizeChannels, publicChannels } from './settings.js'
+import { assertEnum, callImageApiWithRetry, formats, qualities, saveImage } from './utils.js'
 import { optimizePrompt } from './prompt-optimizer.js'
 
 const batchConcurrency = 1
@@ -76,36 +76,53 @@ app.post('/api/auth/login', async (req, res) => {
 
 app.get('/api/settings', requireAuth, async (req, res) => {
   const row = await viewDb((data) => data.settings.find((s) => s.user_id === req.user.id))
-  res.json(row
-    ? { base_url: row.base_url, api_key: row.api_key, model: normalizeModel(row.model), text_model: row.text_model || '', text_base_url: row.text_base_url || '', text_api_key: row.text_api_key || '' }
-    : { base_url: defaultBaseUrl, api_key: '', model: defaultModel, text_model: '', text_base_url: '', text_api_key: '' })
+  const channels = row?.image_channels?.length ? row.image_channels : legacyChannels(row, defaultBaseUrl)
+  res.json({
+    image_channels: channels,
+    text_model: row?.text_model || '',
+    text_base_url: row?.text_base_url || '',
+    text_api_key: row?.text_api_key || ''
+  })
 })
 
 app.post('/api/settings', requireAuth, async (req, res) => {
-  const baseUrl = String(req.body.base_url || defaultBaseUrl).trim()
-  const apiKey = String(req.body.api_key || '').trim()
-  let model
-  try {
-    model = requireModel(req.body.model)
-  } catch (error) {
-    return res.status(400).json({ error: error.message })
+  const channels = normalizeChannels(req.body.image_channels)
+  if (!channels.length) return res.status(400).json({ error: '请至少配置一个完整通道（站点名称、Base URL、分组 Key、模型和尺寸）' })
+  const fields = {
+    image_channels: channels,
+    text_model: String(req.body.text_model || '').trim(),
+    text_base_url: String(req.body.text_base_url || '').trim(),
+    text_api_key: String(req.body.text_api_key || '').trim(),
+    updated_at: new Date().toISOString()
   }
-  if (!apiKey) return res.status(400).json({ error: '请填写 API Key' })
-  const textModel = String(req.body.text_model || '').trim()
-  const textBaseUrl = String(req.body.text_base_url || '').trim()
-  const textApiKey = String(req.body.text_api_key || '').trim()
   await withDb((data) => {
     const old = data.settings.find((s) => s.user_id === req.user.id)
-    if (old) Object.assign(old, { base_url: baseUrl, api_key: apiKey, model, text_model: textModel, text_base_url: textBaseUrl, text_api_key: textApiKey, updated_at: new Date().toISOString() })
-    else data.settings.push({ user_id: req.user.id, base_url: baseUrl, api_key: apiKey, model, text_model: textModel, text_base_url: textBaseUrl, text_api_key: textApiKey, updated_at: new Date().toISOString() })
+    if (old) Object.assign(old, fields)
+    else data.settings.push({ user_id: req.user.id, ...fields })
   })
   res.json({ ok: true })
 })
 
-async function getSettings(userId) {
+app.get('/api/model-channels', requireAuth, async (req, res) => {
+  res.json({ channels: publicChannels(await getImageChannels(req.user.id)) })
+})
+
+async function getImageChannels(userId) {
   const row = await viewDb((data) => data.settings.find((s) => s.user_id === userId))
-  if (!row?.api_key) throw new Error('请先在设置页填写 API Key')
-  return { ...row, base_url: row.base_url || defaultBaseUrl, model: normalizeModel(row.model) }
+  if (row?.image_channels?.length) return row.image_channels
+  return legacyChannels(row, defaultBaseUrl)
+}
+
+async function getImageTarget(userId, ref = {}) {
+  const target = findImageTarget(await getImageChannels(userId), ref)
+  if (!target) return null
+  return { base_url: target.baseUrl, api_key: target.apiKey, model: target.model, sizes: target.sizes }
+}
+
+function resolveSize(requested, allowed) {
+  const value = String(requested || '').trim()
+  if (!value) return allowed[0]
+  return allowed.includes(value) ? value : null
 }
 
 function historyRecord(data, kind, recordId) {
@@ -156,14 +173,16 @@ app.get('/api/images/tasks/:jobId', requireAuth, (req, res) => {
 
 app.post('/api/images/generate', requireAuth, async (req, res) => {
   const prompt = String(req.body.prompt || '').trim()
-  const size = assertEnum(req.body.size, sizes, '1024x1024')
   const quality = assertEnum(req.body.quality, qualities, 'low')
   const outputFormat = assertEnum(req.body.output_format, formats, 'png')
   const n = Math.min(4, Math.max(1, Number(req.body.n || 1)))
   if (!prompt) return res.status(400).json({ error: '请输入提示词' })
+  const settings = await getImageTarget(req.user.id, req.body)
+  if (!settings) return res.status(400).json({ error: '请先在设置页配置图片通道' })
+  const size = resolveSize(req.body.size, settings.sizes)
+  if (!size) return res.status(400).json({ error: '当前模型不支持所选尺寸，请重新选择' })
   let recordId
   try {
-    const settings = await getSettings(req.user.id)
     recordId = await withDb((data) => {
       const record = { id: data.seq.generations++, user_id: req.user.id, prompt, size, quality, output_format: outputFormat, image_path: '', status: 'running', error: '', created_at: new Date().toISOString() }
       data.generations.push(record)
@@ -181,15 +200,17 @@ app.post('/api/images/generate', requireAuth, async (req, res) => {
 
 app.post('/api/images/edit', requireAuth, upload.single('file'), async (req, res) => {
   const prompt = String(req.body.prompt || '').trim()
-  const size = assertEnum(req.body.size, sizes, '1024x1024')
   const quality = assertEnum(req.body.quality, qualities, 'low')
   const outputFormat = assertEnum(req.body.output_format, formats, 'png')
   if (!req.file) return res.status(400).json({ error: '请上传图片文件' })
   const imageUrl = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`
   if (!prompt) return res.status(400).json({ error: '请输入编辑提示词' })
+  const settings = await getImageTarget(req.user.id, req.body)
+  if (!settings) return res.status(400).json({ error: '请先在设置页配置图片通道' })
+  const size = resolveSize(req.body.size, settings.sizes)
+  if (!size) return res.status(400).json({ error: '当前模型不支持所选尺寸，请重新选择' })
   let recordId
   try {
-    const settings = await getSettings(req.user.id)
     recordId = await withDb((data) => {
       const record = { id: data.seq.edits++, user_id: req.user.id, prompt, size, quality, output_format: outputFormat, source_image: imageUrl.slice(0, 500), image_path: '', status: 'running', error: '', created_at: new Date().toISOString() }
       data.edits.push(record)
@@ -210,7 +231,6 @@ app.post('/api/images/edit', requireAuth, upload.single('file'), async (req, res
 
 app.post('/api/images/reference', requireAuth, uploadReferenceImages, async (req, res) => {
   const prompt = String(req.body.prompt || '').trim()
-  const size = assertEnum(req.body.size, sizes, '1024x1024')
   const quality = assertEnum(req.body.quality, qualities, 'low')
   const outputFormat = assertEnum(req.body.output_format, formats, 'png')
   const files = req.files || []
@@ -220,9 +240,12 @@ app.post('/api/images/reference', requireAuth, uploadReferenceImages, async (req
   } catch (error) {
     return res.status(400).json({ error: error.message })
   }
+  const settings = await getImageTarget(req.user.id, req.body)
+  if (!settings) return res.status(400).json({ error: '请先在设置页配置图片通道' })
+  const size = resolveSize(req.body.size, settings.sizes)
+  if (!size) return res.status(400).json({ error: '当前模型不支持所选尺寸，请重新选择' })
   let recordId
   try {
-    const settings = await getSettings(req.user.id)
     const payload = buildReferencePayload({ files, model: settings.model, prompt, size, quality, outputFormat })
     recordId = await withDb((data) => {
       const record = { id: data.seq.edits++, user_id: req.user.id, prompt, size, quality, output_format: outputFormat, source_image: JSON.stringify(files.map((file) => file.originalname)), image_path: '', status: 'running', error: '', created_at: new Date().toISOString(), type: 'reference' }
@@ -244,14 +267,16 @@ app.post('/api/images/reference', requireAuth, uploadReferenceImages, async (req
 
 app.post('/api/images/edit/batch', requireAuth, upload.array('files', 20), async (req, res) => {
   const prompt = String(req.body.prompt || '').trim()
-  const size = assertEnum(req.body.size, sizes, '1024x1024')
   const quality = assertEnum(req.body.quality, qualities, 'low')
   const outputFormat = assertEnum(req.body.output_format, formats, 'png')
   const files = req.files || []
   if (!prompt) return res.status(400).json({ error: '请输入编辑提示词' })
   if (!files.length) return res.status(400).json({ error: '请上传图片文件' })
+  const settings = await getImageTarget(req.user.id, req.body)
+  if (!settings) return res.status(400).json({ error: '请先在设置页配置图片通道' })
+  const size = resolveSize(req.body.size, settings.sizes)
+  if (!size) return res.status(400).json({ error: '当前模型不支持所选尺寸，请重新选择' })
   try {
-    const settings = await getSettings(req.user.id)
     const jobId = `${Date.now()}-${Math.random().toString(16).slice(2)}`
     const job = {
       id: jobId,

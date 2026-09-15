@@ -4,12 +4,16 @@
       <h1 class="text-2xl font-black">AI 改图</h1>
       <p class="mt-2 text-sm text-slate-400">上传单张图片进行编辑</p>
       <div class="mt-6 flex min-h-0 flex-1 flex-col space-y-4">
+        <select v-model="selectedKey" class="field">
+          <option v-if="!targetOptions.length" value="">未配置图片通道，请先到设置页添加</option>
+          <option v-for="option in targetOptions" :key="option.key" :value="option.key">{{ option.label }}</option>
+        </select>
         <input class="field" type="file" accept="image/*" @change="onFile" />
         <div class="relative flex min-h-0 flex-1 flex-col">
           <textarea v-model="form.prompt" class="field min-h-0 flex-1 resize-none pr-10" placeholder="把背景换成纯白色，保持商品主体不变，添加柔和底部阴影" />
           <PromptOptimizer v-model="form.prompt" type="edit" />
         </div>
-        <select v-model="form.size" class="field"><option v-for="option in sizeOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select>
+        <select v-model="form.size" class="field"><option v-for="option in availableSizeOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select>
         <div class="grid grid-cols-2 gap-3">
           <select v-model="form.quality" class="field"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select>
           <select v-model="form.output_format" class="field"><option value="png">png</option><option value="jpeg">jpeg</option><option value="webp">webp</option></select>
@@ -42,16 +46,22 @@
 
 <script setup>
 import axios from 'axios'
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import TaskStatus from '../components/TaskStatus.vue'
 import PromptOptimizer from '../components/PromptOptimizer.vue'
-import { sizeOptions } from '../image-sizes.js'
+import { appendSelection } from '../model-channels.js'
+import { useModelChannels } from '../use-model-channels.js'
 import { useImageTask } from '../use-image-task.js'
 
 const form = ref({ prompt: '', size: '3840x2160', quality: 'high', output_format: 'png' })
+const { options: targetOptions, selectedKey, availableSizeOptions } = useModelChannels()
 const file = ref(null)
 const preview = ref('')
 const { job, images, error, notice, submitting, loading, busy, elapsed, queryCount, start } = useImageTask('edit')
+
+watch(availableSizeOptions, (list) => {
+  if (list.length && !list.some((option) => option.value === form.value.size)) form.value.size = list[0].value
+})
 
 function onFile(e) {
   file.value = e.target.files?.[0] || null
@@ -67,6 +77,7 @@ async function edit() {
   try {
     const data = new FormData()
     Object.entries(form.value).forEach(([k, v]) => data.append(k, v))
+    appendSelection(data, selectedKey.value)
     if (!file.value) throw new Error('请先上传图片文件')
     data.append('file', file.value)
     const res = await axios.post('/api/images/edit', data)
