@@ -116,7 +116,15 @@ async function getImageChannels(userId) {
 async function getImageTarget(userId, ref = {}) {
   const target = findImageTarget(await getImageChannels(userId), ref)
   if (!target) return null
-  return { base_url: target.baseUrl, api_key: target.apiKey, model: target.model, sizes: target.sizes }
+  return {
+    base_url: target.baseUrl,
+    api_key: target.apiKey,
+    model: target.model,
+    sizes: target.sizes,
+    channel_name: target.channelName,
+    group_name: target.groupName,
+    model_name: target.modelName
+  }
 }
 
 function resolveSize(requested, allowed) {
@@ -184,7 +192,7 @@ app.post('/api/images/generate', requireAuth, async (req, res) => {
   let recordId
   try {
     recordId = await withDb((data) => {
-      const record = { id: data.seq.generations++, user_id: req.user.id, prompt, size, quality, output_format: outputFormat, image_path: '', status: 'running', error: '', created_at: new Date().toISOString() }
+      const record = { id: data.seq.generations++, user_id: req.user.id, prompt, size, quality, output_format: outputFormat, image_path: '', status: 'running', error: '', created_at: new Date().toISOString(), channel_name: settings.channel_name, group_name: settings.group_name, model_name: settings.model_name }
       data.generations.push(record)
       return record.id
     })
@@ -212,7 +220,7 @@ app.post('/api/images/edit', requireAuth, upload.single('file'), async (req, res
   let recordId
   try {
     recordId = await withDb((data) => {
-      const record = { id: data.seq.edits++, user_id: req.user.id, prompt, size, quality, output_format: outputFormat, source_image: imageUrl.slice(0, 500), image_path: '', status: 'running', error: '', created_at: new Date().toISOString() }
+      const record = { id: data.seq.edits++, user_id: req.user.id, prompt, size, quality, output_format: outputFormat, source_image: imageUrl.slice(0, 500), image_path: '', status: 'running', error: '', created_at: new Date().toISOString(), channel_name: settings.channel_name, group_name: settings.group_name, model_name: settings.model_name }
       data.edits.push(record)
       return record.id
     })
@@ -248,7 +256,7 @@ app.post('/api/images/reference', requireAuth, uploadReferenceImages, async (req
   try {
     const payload = buildReferencePayload({ files, model: settings.model, prompt, size, quality, outputFormat })
     recordId = await withDb((data) => {
-      const record = { id: data.seq.edits++, user_id: req.user.id, prompt, size, quality, output_format: outputFormat, source_image: JSON.stringify(files.map((file) => file.originalname)), image_path: '', status: 'running', error: '', created_at: new Date().toISOString(), type: 'reference' }
+      const record = { id: data.seq.edits++, user_id: req.user.id, prompt, size, quality, output_format: outputFormat, source_image: JSON.stringify(files.map((file) => file.originalname)), image_path: '', status: 'running', error: '', created_at: new Date().toISOString(), type: 'reference', channel_name: settings.channel_name, group_name: settings.group_name, model_name: settings.model_name }
       data.edits.push(record)
       return record.id
     })
@@ -303,7 +311,7 @@ app.post('/api/images/edit/batch', requireAuth, upload.array('files', 20), async
         let recordId
         try {
           recordId = await withDb((data) => {
-            const record = { id: data.seq.edits++, user_id: req.user.id, prompt, size, quality, output_format: outputFormat, source_image: file.originalname, image_path: '', status: 'running', error: '', created_at: new Date().toISOString(), job_id: jobId, phase: 'queued', progress_text: '排队中', started_at: new Date().toISOString() }
+            const record = { id: data.seq.edits++, user_id: req.user.id, prompt, size, quality, output_format: outputFormat, source_image: file.originalname, image_path: '', status: 'running', error: '', created_at: new Date().toISOString(), job_id: jobId, phase: 'queued', progress_text: '排队中', started_at: new Date().toISOString(), channel_name: settings.channel_name, group_name: settings.group_name, model_name: settings.model_name }
             data.edits.push(record)
             return record.id
           })

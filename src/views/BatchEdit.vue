@@ -24,7 +24,11 @@
           <textarea v-model="form.prompt" class="field min-h-0 flex-1 resize-none pr-10" placeholder="把背景换成纯白色，保持商品主体不变，添加柔和底部阴影" />
           <PromptOptimizer v-model="form.prompt" type="batch" />
         </div>
-        <select v-model="form.size" class="field"><option v-for="option in availableSizeOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select>
+        <div class="grid grid-cols-2 gap-3">
+          <select v-model="selectedTier" class="field"><option v-for="tier in tierOptions" :key="tier" :value="tier">{{ tier }}</option></select>
+          <select v-model="selectedRatio" class="field"><option v-for="option in ratioOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select>
+        </div>
+        <p v-if="currentSizeLabel" class="text-xs text-slate-500">{{ currentSizeLabel }}</p>
         <div class="grid grid-cols-2 gap-3">
           <select v-model="form.quality" class="field"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select>
           <select v-model="form.output_format" class="field"><option value="png">png</option><option value="jpeg">jpeg</option><option value="webp">webp</option></select>
@@ -72,19 +76,15 @@
 <script setup>
 import axios from 'axios'
 import JSZip from 'jszip'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { taskStorageKey } from '../task-feedback.js'
 import PromptOptimizer from '../components/PromptOptimizer.vue'
 import { appendSelection } from '../model-channels.js'
 import { useModelChannels } from '../use-model-channels.js'
 
 const form = ref({ prompt: '', size: '3840x2160', quality: 'high', output_format: 'png' })
-const { options: targetOptions, selectedKey, availableSizeOptions } = useModelChannels()
+const { options: targetOptions, selectedKey, selectedTier, selectedRatio, tierOptions, ratioOptions, currentSizeLabel } = useModelChannels(form)
 const files = ref([])
-
-watch(availableSizeOptions, (list) => {
-  if (list.length && !list.some((option) => option.value === form.value.size)) form.value.size = list[0].value
-})
 const results = ref([])
 const selected = ref([])
 const preview = ref('')

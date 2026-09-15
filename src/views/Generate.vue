@@ -12,7 +12,11 @@
           <textarea v-model="form.prompt" class="field min-h-0 flex-1 resize-none pr-10" placeholder="一只橘猫坐在赛博朋克霓虹街道上，旁边有「深夜食堂」招牌，中文清晰可读" />
           <PromptOptimizer v-model="form.prompt" type="generate" />
         </div>
-        <select v-model="form.size" class="field"><option v-for="option in availableSizeOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select>
+        <div class="grid grid-cols-2 gap-3">
+          <select v-model="selectedTier" class="field"><option v-for="tier in tierOptions" :key="tier" :value="tier">{{ tier }}</option></select>
+          <select v-model="selectedRatio" class="field"><option v-for="option in ratioOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select>
+        </div>
+        <p v-if="currentSizeLabel" class="text-xs text-slate-500">{{ currentSizeLabel }}</p>
         <div class="grid grid-cols-3 gap-3">
           <select v-model="form.quality" class="field"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select>
           <select v-model="form.output_format" class="field"><option value="png">png</option><option value="jpeg">jpeg</option><option value="webp">webp</option></select>
@@ -46,7 +50,7 @@
 
 <script setup>
 import axios from 'axios'
-import { ref, watch } from 'vue'
+import { ref } from 'vue'
 import TaskStatus from '../components/TaskStatus.vue'
 import PromptOptimizer from '../components/PromptOptimizer.vue'
 import { selectionPayload } from '../model-channels.js'
@@ -54,12 +58,8 @@ import { useModelChannels } from '../use-model-channels.js'
 import { useImageTask } from '../use-image-task.js'
 
 const form = ref({ prompt: '', size: '3840x2160', quality: 'high', output_format: 'png', n: 1 })
-const { options: targetOptions, selectedKey, availableSizeOptions } = useModelChannels()
+const { options: targetOptions, selectedKey, selectedTier, selectedRatio, tierOptions, ratioOptions, currentSizeLabel } = useModelChannels(form)
 const { job, images, error, notice, submitting, loading, busy, elapsed, queryCount, start } = useImageTask('generate')
-
-watch(availableSizeOptions, (list) => {
-  if (list.length && !list.some((option) => option.value === form.value.size)) form.value.size = list[0].value
-})
 
 async function generate() {
   error.value = ''

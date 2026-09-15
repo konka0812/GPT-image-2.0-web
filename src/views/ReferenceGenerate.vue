@@ -52,7 +52,11 @@
           <textarea v-model="form.prompt" class="field min-h-24 flex-1 resize-none pr-10" placeholder="例如：Image 1 作为背景，把 Image 2 的人物放在左侧，Image 3 的商品放在右下角，统一光影和透视" />
           <PromptOptimizer v-model="form.prompt" type="reference" />
         </div>
-        <select v-model="form.size" class="field shrink-0"><option v-for="option in availableSizeOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select>
+        <div class="grid shrink-0 grid-cols-2 gap-3">
+          <select v-model="selectedTier" class="field"><option v-for="tier in tierOptions" :key="tier" :value="tier">{{ tier }}</option></select>
+          <select v-model="selectedRatio" class="field"><option v-for="option in ratioOptions" :key="option.value" :value="option.value">{{ option.label }}</option></select>
+        </div>
+        <p v-if="currentSizeLabel" class="shrink-0 text-xs text-slate-500">{{ currentSizeLabel }}</p>
         <div class="grid shrink-0 grid-cols-2 gap-3">
           <select v-model="form.quality" class="field"><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select>
           <select v-model="form.output_format" class="field"><option value="png">png</option><option value="jpeg">jpeg</option><option value="webp">webp</option></select>
@@ -77,7 +81,7 @@
 
 <script setup>
 import axios from 'axios'
-import { onBeforeUnmount, ref, watch } from 'vue'
+import { onBeforeUnmount, ref } from 'vue'
 import { appendReferenceFiles, maxReferenceImages, moveReferenceFile, removeReferenceFile } from '../reference-images.js'
 import TaskStatus from '../components/TaskStatus.vue'
 import PromptOptimizer from '../components/PromptOptimizer.vue'
@@ -86,14 +90,10 @@ import { useModelChannels } from '../use-model-channels.js'
 import { useImageTask } from '../use-image-task.js'
 
 const form = ref({ prompt: '', size: '3840x2160', quality: 'high', output_format: 'png' })
-const { options: targetOptions, selectedKey, availableSizeOptions } = useModelChannels()
+const { options: targetOptions, selectedKey, selectedTier, selectedRatio, tierOptions, ratioOptions, currentSizeLabel } = useModelChannels(form)
 const items = ref([])
 const { job, images, error, notice, submitting, loading, busy, elapsed, queryCount, start } = useImageTask('reference')
 const dragIndex = ref(-1)
-
-watch(availableSizeOptions, (list) => {
-  if (list.length && !list.some((option) => option.value === form.value.size)) form.value.size = list[0].value
-})
 
 function onFiles(event) {
   const incoming = Array.from(event.target.files || [])
