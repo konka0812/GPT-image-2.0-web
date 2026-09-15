@@ -28,10 +28,13 @@
                 <p class="text-xs font-semibold text-slate-200">{{ group.name || '未命名分组' }}</p>
                 <p class="font-mono text-[11px] text-slate-500">{{ maskKey(group.api_key) }}</p>
               </div>
-              <div v-for="model in group.models" :key="model.id" class="mt-2.5">
+              <div v-for="model in group.models" :key="model.id" class="mt-2.5 space-y-1">
                 <p class="text-xs font-semibold text-cyan-200">{{ model.name }}</p>
-                <div class="mt-1.5 flex flex-wrap gap-1.5">
-                  <span v-for="size in model.sizes" :key="size" class="rounded-md bg-white/5 px-2 py-0.5 text-[11px] text-slate-300">{{ sizeLabel(size) }}</span>
+                <div v-for="tier in tierOrder" :key="tier" class="flex flex-wrap items-center gap-1.5">
+                  <template v-if="sizesInTier(model.sizes, tier).length">
+                    <span class="text-[11px] font-bold text-slate-500">{{ tier }}</span>
+                    <span v-for="entry in sizesInTier(model.sizes, tier)" :key="entry.value" :title="formatPixels(entry.value)" class="rounded-md bg-white/5 px-2 py-0.5 text-[11px] text-slate-300">{{ entry.ratio }} {{ entry.name }}</span>
+                  </template>
                 </div>
               </div>
             </div>
@@ -85,11 +88,14 @@
                 <button class="rounded-lg border border-white/10 px-3 py-1.5 text-xs text-slate-300" @click="clearSizes(model)">清空尺寸</button>
                 <button class="rounded-lg border border-red-400/30 bg-red-500/10 px-3 py-1.5 text-xs text-red-200" @click="removeModel(ci, gi, mi)">删除模型</button>
               </div>
-              <div class="mt-2 flex flex-wrap gap-x-4 gap-y-2">
-                <label v-for="size in sizeOptions" :key="size.value" class="flex items-center gap-1.5 text-xs text-slate-300">
-                  <input v-model="model.sizes" type="checkbox" :value="size.value" />
-                  {{ size.label }}
-                </label>
+              <div class="mt-2 space-y-2">
+                <div v-for="tier in tierOrder" :key="tier" class="flex flex-wrap items-center gap-x-4 gap-y-2">
+                  <span class="w-8 shrink-0 text-xs font-bold text-slate-500">{{ tier }}</span>
+                  <label v-for="entry in catalogForTier(tier)" :key="entry.value" :title="formatPixels(entry.value)" class="flex items-center gap-1.5 text-xs text-slate-300">
+                    <input v-model="model.sizes" type="checkbox" :value="entry.value" />
+                    {{ entry.ratio }} {{ entry.name }}
+                  </label>
+                </div>
               </div>
               <p v-if="!model.sizes.length" class="mt-2 text-xs text-amber-300">请至少勾选一个尺寸</p>
             </div>
@@ -142,7 +148,7 @@
 <script setup>
 import axios from 'axios'
 import { onMounted, ref } from 'vue'
-import { sizeOptions } from '../image-sizes.js'
+import { formatPixels, sizeCatalog, tierOrder } from '../image-sizes.js'
 
 const form = ref({ image_channels: [], text_model: '', text_base_url: '', text_api_key: '' })
 const editing = ref(false)
@@ -155,7 +161,7 @@ function makeId(prefix) {
 }
 
 function newModel() {
-  return { id: makeId('md'), name: 'gpt-image-2', sizes: sizeOptions.map((option) => option.value) }
+  return { id: makeId('md'), name: 'gpt-image-2', sizes: sizeCatalog.map((entry) => entry.value) }
 }
 
 function newGroup() {
@@ -187,11 +193,20 @@ function removeModel(channelIndex, groupIndex, modelIndex) {
 }
 
 function selectAllSizes(model) {
-  model.sizes = sizeOptions.map((option) => option.value)
+  model.sizes = sizeCatalog.map((entry) => entry.value)
 }
 
 function clearSizes(model) {
   model.sizes = []
+}
+
+function catalogForTier(tier) {
+  return sizeCatalog.filter((entry) => entry.tier === tier)
+}
+
+function sizesInTier(values, tier) {
+  const set = new Set(Array.isArray(values) ? values : [])
+  return catalogForTier(tier).filter((entry) => set.has(entry.value))
 }
 
 function maskKey(key) {
@@ -199,10 +214,6 @@ function maskKey(key) {
   if (!value) return '未填写'
   if (value.length <= 8) return '••••••'
   return `${value.slice(0, 4)}••••${value.slice(-4)}`
-}
-
-function sizeLabel(value) {
-  return String(value || '').replace('x', '×')
 }
 
 function validate() {

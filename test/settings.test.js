@@ -101,6 +101,16 @@ test('legacyChannels migrates old single-model settings', () => {
   assert.deepEqual(legacyChannels({}, 'https://fallback.example/v1'), [])
 })
 
+test('findImageTarget exposes display names for history records', () => {
+  const channels = normalizeChannels([
+    { id: 'c1', name: '站A', base_url: 'https://a.example/v1', groups: [{ id: 'g1', name: '便宜分组', api_key: 'sk-1', models: [{ id: 'm1', name: 'gpt-image-2', sizes: ['1024x1024'] }] }] }
+  ])
+  const target = findImageTarget(channels, {})
+  assert.equal(target.channelName, '站A')
+  assert.equal(target.groupName, '便宜分组')
+  assert.equal(target.modelName, 'gpt-image-2')
+})
+
 test('settings page has no legacy fallback provider references', async () => {
   const source = await fs.readFile(new URL('../src/views/Settings.vue', import.meta.url), 'utf8')
   assert.doesNotMatch(source, /hk\.testvideo\.site|失败自动切换/)

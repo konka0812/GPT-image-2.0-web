@@ -29,3 +29,10 @@ test('history page shows refresh feedback', async () => {
   assert.match(history, /refreshMessage\.value = '已刷新'/)
   assert.match(history, /setTimeout\(\(\) => \{ refreshMessage\.value = '' \}, 2000\)/)
 })
+
+test('history cards show the channel, group and model used', async () => {
+  const card = await fs.readFile(new URL('../src/components/RecordCard.vue', import.meta.url), 'utf8')
+  assert.match(card, /channel_name/)
+  assert.match(card, /group_name/)
+  assert.match(card, /model_name/)
+})

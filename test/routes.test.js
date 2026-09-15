@@ -51,3 +51,10 @@ test('settings POST validates image channels', async () => {
   assert.match(source, /normalizeChannels\(req\.body\.image_channels\)/)
   assert.match(source, /请至少配置一个完整通道/)
 })
+
+test('generation history records keep channel, group and model names', async () => {
+  const source = await fs.readFile(new URL('../server/index.js', import.meta.url), 'utf8')
+  assert.match(source, /channel_name: settings\.channel_name/)
+  assert.match(source, /group_name: settings\.group_name/)
+  assert.match(source, /model_name: settings\.model_name/)
+})
