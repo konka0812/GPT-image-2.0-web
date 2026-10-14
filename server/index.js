@@ -168,7 +168,7 @@ app.post('/api/maintenance/cleanup-images', requireAuth, async (req, res) => {
 
 async function fetchUpstreamTasks(settings) {
   const base = (settings.base_url || defaultBaseUrl).replace(/\/$/, '')
-  const response = await fetch(`${base}/images/tasks`, {
+  const response = await fetch(`${base}/images/tasks?limit=60`, {
     headers: { Authorization: `Bearer ${settings.api_key}` },
     signal: AbortSignal.timeout(30000)
   })

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { resolvePollUrl, extractImageItems, isCompletedImageTask, resolveImageSource, resolveAssetUrl, sameSite, upstreamStatusLabel, pollBudgetMs, evaluatePollState, formatWaitMs, isTransientNetworkError, extractTaskId } from '../server/utils.js'
+import { resolvePollUrl, extractImageItems, isCompletedImageTask, resolveImageSource, resolveImageSources, resolveAssetUrl, sameSite, upstreamStatusLabel, pollBudgetMs, evaluatePollState, formatWaitMs, isTransientNetworkError, extractTaskId } from '../server/utils.js'
 
 test('resolvePollUrl resolves root-relative task URLs against the origin', () => {
   assert.equal(
@@ -41,6 +41,18 @@ test('resolveImageSource prefers base64, then signed urls, then plain urls', () 
   assert.deepEqual(resolveImageSource({ url: 'https://u' }), { type: 'url', url: 'https://u', signed: false })
   assert.deepEqual(resolveImageSource({ download_url: 'https://d' }), { type: 'url', url: 'https://d', signed: false })
   assert.equal(resolveImageSource({}), null)
+})
+
+test('resolveImageSources lists every download candidate in priority order', () => {
+  assert.deepEqual(resolveImageSources({ b64_json: 'a', signed_url: 'https://s', url: 'https://u', download_url: 'https://d' }), [
+    { type: 'base64', data: 'a' },
+    { type: 'url', url: 'https://s', signed: true },
+    { type: 'url', url: 'https://u', signed: false },
+    { type: 'url', url: 'https://d', signed: false }
+  ])
+  assert.deepEqual(resolveImageSources({ url: 'https://u' }), [{ type: 'url', url: 'https://u', signed: false }])
+  assert.deepEqual(resolveImageSources({}), [])
+  assert.deepEqual(resolveImageSources(null), [])
 })
 
 test('sameSite keeps api keys from leaking to other domains', () => {
