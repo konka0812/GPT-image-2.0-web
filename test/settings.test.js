@@ -131,6 +131,12 @@ test('settings page exposes orphan image cleanup', async () => {
   assert.match(source, /api\/maintenance\/image-stats/)
 })
 
+test('settings page exposes image recovery', async () => {
+  const source = await fs.readFile(new URL('../src/views/Settings.vue', import.meta.url), 'utf8')
+  assert.match(source, /追回丢失图片/)
+  assert.match(source, /api\/maintenance\/recover-images/)
+})
+
 test('settings page requires edit mode before changes', async () => {
   const source = await fs.readFile(new URL('../src/views/Settings.vue', import.meta.url), 'utf8')
   assert.match(source, /编辑配置/)

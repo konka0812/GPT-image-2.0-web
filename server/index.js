@@ -10,8 +10,8 @@ import { requireAuth, signToken } from './auth.js'
 import { completeJob, createJob, failJob, getJob, updateJob } from './jobs.js'
 import { buildReferencePayload, maxReferenceImageBytes, validateReferenceFiles } from './reference.js'
 import { findImageTarget, legacyChannels, normalizeChannels, publicChannels } from './settings.js'
-import { assertEnum, callImageApiWithRetry, extractImageItems, formats, formatWaitMs, qualities, saveImage, upstreamStatusLabel } from './utils.js'
-import { cleanupOrphans, collectImageNames, imageStats, removeImages } from './maintenance.js'
+import { assertEnum, callImageApiWithRetry, extractImageItems, extractTaskId, formats, formatWaitMs, qualities, saveImage, upstreamStatusLabel } from './utils.js'
+import { cleanupOrphans, collectImageNames, findMatchingTask, imageStats, removeImages } from './maintenance.js'
 import { optimizePrompt } from './prompt-optimizer.js'
 
 const batchConcurrency = 1
@@ -166,6 +166,82 @@ app.post('/api/maintenance/cleanup-images', requireAuth, async (req, res) => {
   }
 })
 
+async function fetchUpstreamTasks(settings) {
+  const base = (settings.base_url || defaultBaseUrl).replace(/\/$/, '')
+  const response = await fetch(`${base}/images/tasks`, {
+    headers: { Authorization: `Bearer ${settings.api_key}` },
+    signal: AbortSignal.timeout(30000)
+  })
+  if (!response.ok) throw new Error(`获取上游任务列表失败: HTTP ${response.status}`)
+  const body = await response.json()
+  return Array.isArray(body?.data) ? body.data : []
+}
+
+async function recoverMissingImages(userId, days = 3) {
+  const row = await viewDb((data) => data.settings.find((s) => s.user_id === userId))
+  const channels = row?.image_channels?.length ? row.image_channels : legacyChannels(row, defaultBaseUrl)
+  const since = Date.now() - Math.max(1, days) * 86400000
+
+  const targets = await viewDb((data) => [
+    ...data.generations.map((record) => ({ kind: 'generate', record })),
+    ...data.edits.map((record) => ({ kind: 'edit', record }))
+  ].filter(({ record }) => record.user_id === userId
+    && record.status === 'failed'
+    && !record.image_path
+    && new Date(record.created_at).getTime() >= since))
+
+  const groups = new Map()
+  for (const channel of channels) {
+    for (const group of channel.groups) {
+      groups.set(`${channel.name}::${group.name}`, { base_url: channel.base_url, api_key: group.api_key })
+    }
+  }
+  const fallback = groups.values().next().value || null
+  const taskCache = new Map()
+  const recovered = []
+  const skipped = []
+
+  for (const { kind, record } of targets) {
+    const settings = groups.get(`${record.channel_name}::${record.group_name}`) || fallback
+    if (!settings) { skipped.push(record.id); continue }
+    try {
+      const cacheKey = `${settings.base_url}::${settings.api_key}`
+      if (!taskCache.has(cacheKey)) taskCache.set(cacheKey, await fetchUpstreamTasks(settings))
+      const task = findMatchingTask(record, taskCache.get(cacheKey))
+      if (!task) { skipped.push(record.id); continue }
+      const items = extractImageItems(task)
+      if (!items.length) { skipped.push(record.id); continue }
+      const images = []
+      for (const item of items.slice(0, 4)) images.push(await saveImage(item, record.output_format || 'png', { apiKey: settings.api_key, baseUrl: settings.base_url }))
+      if (!images.length) { skipped.push(record.id); continue }
+      await withDb((data) => {
+        const target = historyRecord(data, kind, record.id)
+        if (target) Object.assign(target, {
+          image_path: JSON.stringify(images),
+          status: 'success',
+          phase: 'success',
+          progress_text: '已从上游追回图片',
+          error: '',
+          completed_at: new Date().toISOString(),
+          upstream_task_id: task.id || ''
+        })
+      })
+      recovered.push({ id: record.id, taskId: task.id || '', images: images.length })
+    } catch {
+      skipped.push(record.id)
+    }
+  }
+  return { checked: targets.length, recovered: recovered.length, skipped: skipped.length, records: recovered }
+}
+
+app.post('/api/maintenance/recover-images', requireAuth, async (req, res) => {
+  try {
+    res.json(await recoverMissingImages(req.user.id, Number(req.body?.days || 3)))
+  } catch (error) {
+    res.status(500).json({ error: error.message })
+  }
+})
+
 function historyRecord(data, kind, recordId) {
   const records = kind === 'generate' ? data.generations : data.edits
   return records.find((record) => record.id === recordId)
@@ -189,6 +265,7 @@ function reportJobStatus(job, status) {
   if (status.type === 'retry') fields = { phase: 'retry', progressText: `调用失败，等待后进行第 ${status.nextAttempt}/${status.max} 次尝试`, attempt: status.attempt, maxAttempts: status.max, baseUrl: status.baseUrl }
   if (status.type === 'accepted') fields = { phase: 'accepted', progressText: '上游已接受任务，等待处理', baseUrl: status.baseUrl }
   if (status.type === 'poll') fields = { phase: 'polling', progressText: `正在第 ${status.pollCount} 次查询上游任务${waitSuffix(status)}`, pollCount: status.pollCount, baseUrl: status.baseUrl }
+  if (status.type === 'poll-retry') fields = { phase: 'polling', progressText: `查询上游时网络抖动，正在重试（第 ${status.transientFailures} 次）${waitSuffix(status)}`, pollCount: status.pollCount, baseUrl: status.baseUrl }
   if (status.type === 'poll-result') fields = { phase: 'polling', progressText: `第 ${status.pollCount} 次查询：${upstreamStatusLabel(status.status)}${waitSuffix(status)}`, pollCount: status.pollCount, baseUrl: status.baseUrl }
   if (!Object.keys(fields).length) return
   updateJob(job.id, fields)
@@ -196,18 +273,22 @@ function reportJobStatus(job, status) {
 }
 
 async function finishImageJob(job, settings, endpoint, payload, outputFormat, maxImages = Infinity) {
+  let upstreamTaskId = ''
   try {
-    const result = await callImageApiWithRetry({ baseUrl: settings.base_url || defaultBaseUrl, apiKey: settings.api_key, endpoint, payload }, 2, (status) => reportJobStatus(job, status))
+    const result = await callImageApiWithRetry({ baseUrl: settings.base_url || defaultBaseUrl, apiKey: settings.api_key, endpoint, payload }, 2, (status) => {
+      if (status.taskId) upstreamTaskId = status.taskId
+      reportJobStatus(job, status)
+    })
     updateJob(job.id, { phase: 'saving', progressText: '上游处理完成，正在保存图片' })
     await updateJobHistory(job, { phase: 'saving', progress_text: '上游处理完成，正在保存图片' }).catch(() => {})
     const images = []
     for (const item of extractImageItems(result).slice(0, maxImages)) images.push(await saveImage(item, outputFormat, { apiKey: settings.api_key, baseUrl: settings.base_url }))
     if (!images.length) throw new Error('上游未返回生成图片')
     completeJob(job.id, images)
-    await updateJobHistory(job, { image_path: JSON.stringify(images), status: 'success', phase: 'success', progress_text: '处理成功', completed_at: new Date().toISOString() }).catch(() => {})
+    await updateJobHistory(job, { image_path: JSON.stringify(images), status: 'success', phase: 'success', progress_text: '处理成功', completed_at: new Date().toISOString(), upstream_task_id: upstreamTaskId }).catch(() => {})
   } catch (error) {
     failJob(job.id, error)
-    await updateJobHistory(job, { status: 'failed', phase: 'failed', progress_text: error.message, error: error.message, completed_at: new Date().toISOString() }).catch(() => {})
+    await updateJobHistory(job, { status: 'failed', phase: 'failed', progress_text: error.message, error: error.message, completed_at: new Date().toISOString(), upstream_task_id: upstreamTaskId }).catch(() => {})
   }
 }
 
@@ -353,20 +434,23 @@ app.post('/api/images/edit/batch', requireAuth, upload.array('files', 20), async
             data.edits.push(record)
             return record.id
           })
+          let batchTaskId = ''
           const data = await callImageApiWithRetry({ baseUrl: settings.base_url || defaultBaseUrl, apiKey: settings.api_key, endpoint: '/images/edits', payload: { model: settings.model, prompt, images: [{ image_url: imageUrl }], size, quality } }, 2, (status) => {
+            if (status.taskId) batchTaskId = status.taskId
             if (status.type === 'attempt') job.results[index].progressText = `调用 ${status.baseUrl}，第 ${status.attempt}/${status.max} 次`
             if (status.type === 'retry') job.results[index].progressText = `${status.baseUrl} 超时/失败，8秒后重试第 ${status.nextAttempt}/${status.max} 次`
             if (status.type === 'poll') job.results[index].progressText = `正在第 ${status.pollCount} 次查询上游任务${waitSuffix(status)}`
+            if (status.type === 'poll-retry') job.results[index].progressText = `查询上游时网络抖动，正在重试（第 ${status.transientFailures} 次）${waitSuffix(status)}`
             if (status.type === 'poll-result') job.results[index].progressText = `第 ${status.pollCount} 次查询：${upstreamStatusLabel(status.status)}${waitSuffix(status)}`
             const progress = job.results[index].progressText
             void withDb((data) => {
               const record = data.edits.find((entry) => entry.id === recordId)
-              if (record) Object.assign(record, { phase: status.type, progress_text: progress, attempt: status.attempt, poll_count: status.pollCount, base_url: status.baseUrl })
+              if (record) Object.assign(record, { phase: status.type, progress_text: progress, attempt: status.attempt, poll_count: status.pollCount, base_url: status.baseUrl, upstream_task_id: batchTaskId })
             }).catch(() => {})
           })
           const images = []
           for (const item of extractImageItems(data)) images.push(await saveImage(item, outputFormat, { apiKey: settings.api_key, baseUrl: settings.base_url }))
-          await withDb((data) => { const r = data.edits.find((r) => r.id === recordId); if (r) Object.assign(r, { image_path: JSON.stringify(images), status: 'success', phase: 'success', progress_text: '处理成功', completed_at: new Date().toISOString() }) })
+          await withDb((data) => { const r = data.edits.find((r) => r.id === recordId); if (r) Object.assign(r, { image_path: JSON.stringify(images), status: 'success', phase: 'success', progress_text: '处理成功', completed_at: new Date().toISOString(), upstream_task_id: batchTaskId }) })
           job.results[index] = { index, name: file.originalname, status: 'success', progressText: '处理成功', images }
         } catch (error) {
           if (recordId) await withDb((data) => { const r = data.edits.find((r) => r.id === recordId); if (r) Object.assign(r, { status: 'failed', phase: 'failed', progress_text: chunkError(error), error: chunkError(error), completed_at: new Date().toISOString() }) })

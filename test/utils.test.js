@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { resolvePollUrl, extractImageItems, isCompletedImageTask, resolveImageSource, resolveAssetUrl, sameSite, upstreamStatusLabel, pollBudgetMs, evaluatePollState, formatWaitMs } from '../server/utils.js'
+import { resolvePollUrl, extractImageItems, isCompletedImageTask, resolveImageSource, resolveAssetUrl, sameSite, upstreamStatusLabel, pollBudgetMs, evaluatePollState, formatWaitMs, isTransientNetworkError, extractTaskId } from '../server/utils.js'
 
 test('resolvePollUrl resolves root-relative task URLs against the origin', () => {
   assert.equal(
@@ -90,4 +90,22 @@ test('formatWaitMs renders short human readable waits', () => {
   assert.equal(formatWaitMs(45000), '45秒')
   assert.equal(formatWaitMs(150000), '2分30秒')
   assert.equal(formatWaitMs(900000), '15分00秒')
+})
+
+test('isTransientNetworkError detects dropped connections', () => {
+  assert.equal(isTransientNetworkError(new Error('fetch failed')), true)
+  assert.equal(isTransientNetworkError(new Error('terminated')), true)
+  assert.equal(isTransientNetworkError(new Error('socket hang up')), true)
+  assert.equal(isTransientNetworkError({ message: 'fetch failed', cause: { code: 'ECONNRESET' } }), true)
+  assert.equal(isTransientNetworkError({ message: 'other side closed', cause: { code: 'UND_ERR_SOCKET' } }), true)
+  assert.equal(isTransientNetworkError(new Error('HTTP 401')), false)
+  assert.equal(isTransientNetworkError(new Error('上游任务失败')), false)
+  assert.equal(isTransientNetworkError(null), false)
+})
+
+test('extractTaskId pulls the upstream task id from poll urls', () => {
+  assert.equal(extractTaskId('/v1/images/tasks/imgtask_706fd70c-2e49-48b4-99f4-d1941f5e5b6c'), 'imgtask_706fd70c-2e49-48b4-99f4-d1941f5e5b6c')
+  assert.equal(extractTaskId('https://api.example.com/v1/images/tasks/imgtask_abc-123?view=summary'), 'imgtask_abc-123')
+  assert.equal(extractTaskId(''), '')
+  assert.equal(extractTaskId(undefined), '')
 })

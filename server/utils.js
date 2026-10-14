@@ -101,15 +101,24 @@ export function resolveAssetUrl(url, baseUrl) {
 
 async function downloadImage(url, { apiKey, baseUrl, signed }) {
   const target = resolveAssetUrl(url, baseUrl)
-  const attempts = []
-  if (!signed && apiKey && sameSite(target, baseUrl)) attempts.push({ Authorization: `Bearer ${apiKey}` })
-  attempts.push(null)
+  const authAttempts = []
+  if (!signed && apiKey && sameSite(target, baseUrl)) authAttempts.push({ Authorization: `Bearer ${apiKey}` })
+  authAttempts.push(null)
   let lastError
-  for (const headers of attempts) {
-    const response = await fetch(target, headers ? { headers } : {})
-    if (response.ok) return Buffer.from(await response.arrayBuffer())
-    lastError = new Error(`下载图片失败: HTTP ${response.status}`)
-    if (response.status !== 401 && response.status !== 403) throw lastError
+  for (const headers of authAttempts) {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      try {
+        const response = await fetch(target, { headers: headers || {}, signal: AbortSignal.timeout(120000) })
+        if (response.ok) return Buffer.from(await response.arrayBuffer())
+        lastError = new Error(`下载图片失败: HTTP ${response.status}`)
+        if (response.status === 401 || response.status === 403) break
+        throw lastError
+      } catch (error) {
+        if (!isTransientNetworkError(error)) throw error
+        lastError = error
+        await sleep(1500 * (attempt + 1))
+      }
+    }
   }
   throw lastError
 }
@@ -132,9 +141,49 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+const transientPatterns = [
+  'fetch failed',
+  'terminated',
+  'socket hang up',
+  'other side closed',
+  'econnreset',
+  'econnrefused',
+  'econnaborted',
+  'etimedout',
+  'epipe',
+  'eai_again',
+  'und_err_socket',
+  'und_err_connect_timeout',
+  'und_err_headers_timeout',
+  'und_err_body_timeout',
+  'network',
+  'connection closed',
+  'connection reset'
+]
+
+export function isTransientNetworkError(error) {
+  if (!error) return false
+  const parts = []
+  let current = error
+  for (let i = 0; current && i < 4; i += 1) {
+    parts.push(String(current.message || ''), String(current.code || ''))
+    current = current.cause
+  }
+  const text = parts.join(' ').toLowerCase()
+  return transientPatterns.some((pattern) => text.includes(pattern))
+}
+
+export function extractTaskId(pollUrl) {
+  const text = String(pollUrl || '')
+  const match = text.match(/imgtask[_A-Za-z0-9-]+/)
+  if (match) return match[0]
+  return text.split('?')[0].split('/').filter(Boolean).pop() || ''
+}
+
 function isRetryable(error) {
   const message = error?.message || ''
   if (message.includes('上游任务')) return false
+  if (isTransientNetworkError(error)) return true
   return message.includes('超时') || message.includes('暂时不可用') || message.includes('timeout') || message.includes('HTTP 502') || message.includes('HTTP 524')
 }
 
@@ -151,6 +200,7 @@ async function pollAsyncTask({ baseUrl, apiKey, pollUrl, pollAfterMs = 3000, onS
   const startedAt = Date.now()
   let intervalMs = Math.max(1000, Math.min(pollAfterMs || 3000, 10000))
   let pollCount = 0
+  let transientFailures = 0
   let pausedSince = 0
   let sawUncertain = false
 
@@ -168,11 +218,21 @@ async function pollAsyncTask({ baseUrl, apiKey, pollUrl, pollAfterMs = 3000, onS
     await sleep(intervalMs)
     pollCount += 1
     onStatus({ type: 'poll', pollCount, status: 'running', baseUrl, elapsedMs, budgetMs: budget })
-    const response = await fetch(url, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-      signal: AbortSignal.timeout(60000)
-    })
-    const text = await response.text()
+    let response
+    let text
+    try {
+      response = await fetch(url, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        signal: AbortSignal.timeout(60000)
+      })
+      text = await response.text()
+    } catch (error) {
+      if (!isTransientNetworkError(error)) throw error
+      transientFailures += 1
+      onStatus({ type: 'poll-retry', pollCount, error: error.message, transientFailures, elapsedMs: Date.now() - startedAt, budgetMs: budget, baseUrl })
+      await sleep(Math.min(2000 * transientFailures, 10000))
+      continue
+    }
     let data
     try { data = JSON.parse(text) } catch { data = { error: text } }
     if (!response.ok) {
@@ -213,7 +273,7 @@ export async function callImageApi({ baseUrl, apiKey, endpoint, payload, onStatu
   let data
   try { data = JSON.parse(text) } catch { data = { error: text } }
   if (response.status === 202 && data?.poll_url) {
-    onStatus({ type: 'accepted', status: data.status || 'queued', baseUrl })
+    onStatus({ type: 'accepted', status: data.status || 'queued', baseUrl, pollUrl: data.poll_url, taskId: extractTaskId(data.poll_url) })
     return pollAsyncTask({ baseUrl, apiKey, pollUrl: data.poll_url, pollAfterMs: data.poll_after_ms, onStatus })
   }
   if (!response.ok) {

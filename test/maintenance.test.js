@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { collectImageNames, cleanupOrphans, imageStats, removeImages } from '../server/maintenance.js'
+import { collectImageNames, cleanupOrphans, imageStats, removeImages, findMatchingTask } from '../server/maintenance.js'
 
 function makeDir() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'uploads-test-'))
@@ -65,4 +65,37 @@ test('removeImages deletes only existing files', () => {
   assert.equal(result.freedBytes, 200)
   assert.ok(fs.existsSync(path.join(dir, 'keep.png')))
   fs.rmSync(dir, { recursive: true, force: true })
+})
+
+const editRecord = {
+  source_image: 'shot.png',
+  size: '3840x2160',
+  model_name: 'gpt-image-2',
+  started_at: '2026-10-14T13:50:08.000Z',
+  created_at: '2026-10-14T13:50:07.000Z'
+}
+
+const tasks = [
+  { id: 'imgtask_late', status: 'success', endpoint: '/v1/images/generations', size: '3840x2160', model: 'gpt-image-2', created_at: '2026-10-14T13:50:20.000Z' },
+  { id: 'imgtask_wrong_size', status: 'success', endpoint: '/v1/images/edits', size: '1024x1024', model: 'gpt-image-2', created_at: '2026-10-14T13:50:15.000Z' },
+  { id: 'imgtask_running', status: 'running', endpoint: '/v1/images/edits', size: '3840x2160', model: 'gpt-image-2', created_at: '2026-10-14T13:50:09.000Z' },
+  { id: 'imgtask_match', status: 'success', endpoint: '/v1/images/edits', size: '3840x2160', model: 'gpt-image-2', created_at: '2026-10-14T13:50:09.000Z' },
+  { id: 'imgtask_far', status: 'success', endpoint: '/v1/images/edits', size: '3840x2160', model: 'gpt-image-2', created_at: '2026-10-14T13:40:00.000Z' }
+]
+
+test('findMatchingTask picks the closest successful upstream task', () => {
+  const match = findMatchingTask(editRecord, tasks)
+  assert.equal(match?.id, 'imgtask_match')
+})
+
+test('findMatchingTask ignores wrong endpoint, size, status and distant tasks', () => {
+  const onlyBad = tasks.filter((t) => t.id !== 'imgtask_match')
+  assert.equal(findMatchingTask(editRecord, onlyBad), null)
+  assert.equal(findMatchingTask(editRecord, []), null)
+  assert.equal(findMatchingTask({}, tasks), null)
+})
+
+test('findMatchingTask honours the time tolerance', () => {
+  const match = findMatchingTask(editRecord, tasks, 500)
+  assert.equal(match, null)
 })
