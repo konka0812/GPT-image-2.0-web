@@ -67,3 +67,26 @@ export function cleanupOrphans(uploadDir, referenced = new Set(), now = Date.now
   }
   return removeImages(uploadDir, names)
 }
+
+export function findMatchingTask(record, tasks, toleranceMs = 180000) {
+  if (!record || !Array.isArray(tasks) || !tasks.length) return null
+  const started = new Date(record.started_at || record.created_at || 0).getTime()
+  if (!started) return null
+  const endpoint = record.source_image ? '/v1/images/edits' : '/v1/images/generations'
+  let best = null
+  let bestDelta = Infinity
+  for (const task of tasks) {
+    if (!task || task.status !== 'success') continue
+    if (task.endpoint && task.endpoint !== endpoint) continue
+    if (record.size && task.size && task.size !== record.size) continue
+    if (record.model_name && task.model && task.model !== record.model_name) continue
+    const when = new Date(task.created_at || 0).getTime()
+    if (!when) continue
+    const delta = Math.abs(when - started)
+    if (delta <= toleranceMs && delta < bestDelta) {
+      best = task
+      bestDelta = delta
+    }
+  }
+  return best
+}

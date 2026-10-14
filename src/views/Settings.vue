@@ -69,6 +69,11 @@
             :disabled="cleaning || !stats || !stats.orphanFiles"
             @click="cleanupImages"
           >{{ cleaning ? '清理中...' : '清理无用图片' }}</button>
+          <button
+            class="ml-2 mt-3 rounded-xl border border-cyan-400/30 bg-cyan-500/10 px-4 py-2 text-sm text-cyan-200 disabled:opacity-40"
+            :disabled="recovering"
+            @click="recoverImages"
+          >{{ recovering ? '追回中...' : '追回丢失图片' }}</button>
         </div>
       </section>
     </div>
@@ -172,6 +177,7 @@ const loading = ref(false)
 const dialog = ref(null)
 const stats = ref(null)
 const cleaning = ref(false)
+const recovering = ref(false)
 const error = ref('')
 
 function showDialog(title, message) {
@@ -206,6 +212,21 @@ async function cleanupImages() {
     showDialog('清理失败', e.response?.data?.error || e.message)
   } finally {
     cleaning.value = false
+  }
+}
+
+async function recoverImages() {
+  if (!confirm('将检查最近 3 天失败的任务；如果上游其实已生成成功，会把图片追回来。继续吗？')) return
+  recovering.value = true
+  try {
+    const { data } = await axios.post('/api/maintenance/recover-images', { days: 3 })
+    await load()
+    await loadStats()
+    showDialog('追回完成', `检查失败记录 ${data.checked} 条\n成功追回 ${data.recovered} 条\n未匹配 ${data.skipped} 条`)
+  } catch (e) {
+    showDialog('追回失败', e.response?.data?.error || e.message)
+  } finally {
+    recovering.value = false
   }
 }
 
