@@ -216,13 +216,14 @@ async function cleanupImages() {
 }
 
 async function recoverImages() {
-  if (!confirm('将检查最近 3 天失败的任务；如果上游其实已生成成功，会把图片追回来。继续吗？')) return
+  if (!confirm('将检查最近 5 天失败的任务；如果上游其实已生成成功，会把图片追回来。继续吗？')) return
   recovering.value = true
   try {
-    const { data } = await axios.post('/api/maintenance/recover-images', { days: 3 })
+    const { data } = await axios.post('/api/maintenance/recover-images', { days: 5 })
     await load()
     await loadStats()
-    showDialog('追回完成', `检查失败记录 ${data.checked} 条\n成功追回 ${data.recovered} 条\n未匹配 ${data.skipped} 条`)
+    const more = data.partial ? '\n（本轮时间到，可再点一次继续）' : ''
+    showDialog('追回完成', `已检查 ${data.checked} / ${data.total} 条失败记录\n成功追回 ${data.recovered} 条\n未匹配 ${data.skipped} 条${more}`)
   } catch (e) {
     showDialog('追回失败', e.response?.data?.error || e.message)
   } finally {
