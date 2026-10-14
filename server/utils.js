@@ -81,6 +81,16 @@ export function resolveImageSource(item) {
   return null
 }
 
+export function resolveImageSources(item) {
+  if (!item || typeof item !== 'object') return []
+  const sources = []
+  if (item.b64_json) sources.push({ type: 'base64', data: item.b64_json })
+  if (item.signed_url) sources.push({ type: 'url', url: item.signed_url, signed: true })
+  if (item.url) sources.push({ type: 'url', url: item.url, signed: false })
+  if (item.download_url) sources.push({ type: 'url', url: item.download_url, signed: false })
+  return sources
+}
+
 export function sameSite(url, baseUrl) {
   try {
     const site = (value) => new URL(value).hostname.split('.').slice(-2).join('.')
@@ -106,9 +116,9 @@ async function downloadImage(url, { apiKey, baseUrl, signed }) {
   authAttempts.push(null)
   let lastError
   for (const headers of authAttempts) {
-    for (let attempt = 0; attempt < 4; attempt += 1) {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        const response = await fetch(target, { headers: headers || {}, signal: AbortSignal.timeout(120000) })
+        const response = await fetch(target, { headers: headers || {}, signal: AbortSignal.timeout(90000) })
         if (response.ok) return Buffer.from(await response.arrayBuffer())
         lastError = new Error(`下载图片失败: HTTP ${response.status}`)
         if (response.status === 401 || response.status === 403) break
@@ -116,7 +126,7 @@ async function downloadImage(url, { apiKey, baseUrl, signed }) {
       } catch (error) {
         if (!isTransientNetworkError(error)) throw error
         lastError = error
-        await sleep(1500 * (attempt + 1))
+        await sleep(2000 * (attempt + 1))
       }
     }
   }
@@ -124,17 +134,28 @@ async function downloadImage(url, { apiKey, baseUrl, signed }) {
 }
 
 export async function saveImage(item, format = 'png', options = {}) {
-  const source = resolveImageSource(item)
-  if (!source) throw new Error('上游返回的图片数据格式未知')
-  if (source.type === 'base64') return saveBase64Image(source.data, format)
+  const sources = resolveImageSources(item)
+  if (!sources.length) throw new Error('上游返回的图片数据格式未知')
+  const inline = sources.find((source) => source.type === 'base64')
+  if (inline) return saveBase64Image(inline.data, format)
+
   const safeFormat = assertEnum(format, formats, 'png')
   const dir = process.env.UPLOAD_DIR || 'uploads'
   await fs.mkdir(dir, { recursive: true })
   const name = `${Date.now()}-${Math.random().toString(16).slice(2)}.${safeFormat}`
   const file = path.join(dir, name)
-  const buffer = await downloadImage(source.url, { apiKey: options.apiKey, baseUrl: options.baseUrl, signed: source.signed })
-  await fs.writeFile(file, buffer)
-  return `/uploads/${name}`
+
+  let lastError
+  for (const source of sources) {
+    try {
+      const buffer = await downloadImage(source.url, { apiKey: options.apiKey, baseUrl: options.baseUrl, signed: source.signed })
+      await fs.writeFile(file, buffer)
+      return `/uploads/${name}`
+    } catch (error) {
+      lastError = error
+    }
+  }
+  throw lastError || new Error('上游返回的图片数据格式未知')
 }
 
 function sleep(ms) {
@@ -158,7 +179,8 @@ const transientPatterns = [
   'und_err_body_timeout',
   'network',
   'connection closed',
-  'connection reset'
+  'connection reset',
+  'timeout'
 ]
 
 export function isTransientNetworkError(error) {
