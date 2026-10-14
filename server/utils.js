@@ -42,6 +42,7 @@ const terminalFailureStatuses = new Set(['failed', 'error', 'rejected', 'cancele
 const defaultPollBudgetMs = Number(process.env.POLL_BUDGET_MS || 900000)
 const uncertainPollBudgetMs = Number(process.env.POLL_UNCERTAIN_BUDGET_MS || 1200000)
 const pausedPollGraceMs = Number(process.env.POLL_PAUSED_GRACE_MS || 120000)
+const downloadTimeoutMs = Number(process.env.IMAGE_DOWNLOAD_TIMEOUT_MS || 300000)
 
 export function pollBudgetMs({ baseMs, uncertainMs, sawUncertain }) {
   return sawUncertain ? uncertainMs : baseMs
@@ -116,18 +117,15 @@ async function downloadImage(url, { apiKey, baseUrl, signed }) {
   authAttempts.push(null)
   let lastError
   for (const headers of authAttempts) {
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        const response = await fetch(target, { headers: headers || {}, signal: AbortSignal.timeout(90000) })
-        if (response.ok) return Buffer.from(await response.arrayBuffer())
-        lastError = new Error(`下载图片失败: HTTP ${response.status}`)
-        if (response.status === 401 || response.status === 403) break
-        throw lastError
-      } catch (error) {
-        if (!isTransientNetworkError(error)) throw error
-        lastError = error
-        await sleep(2000 * (attempt + 1))
-      }
+    try {
+      const response = await fetch(target, { headers: headers || {}, signal: AbortSignal.timeout(downloadTimeoutMs) })
+      if (response.ok) return Buffer.from(await response.arrayBuffer())
+      lastError = new Error(`下载图片失败: HTTP ${response.status}`)
+      if (response.status === 401 || response.status === 403) continue
+      throw lastError
+    } catch (error) {
+      if (!isTransientNetworkError(error)) throw error
+      lastError = error
     }
   }
   throw lastError
