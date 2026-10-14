@@ -181,6 +181,7 @@ async function recoverMissingImages(userId, days = 3) {
   const row = await viewDb((data) => data.settings.find((s) => s.user_id === userId))
   const channels = row?.image_channels?.length ? row.image_channels : legacyChannels(row, defaultBaseUrl)
   const since = Date.now() - Math.max(1, days) * 86400000
+  const deadline = Date.now() + 240000
 
   const targets = await viewDb((data) => [
     ...data.generations.map((record) => ({ kind: 'generate', record })),
@@ -200,8 +201,11 @@ async function recoverMissingImages(userId, days = 3) {
   const taskCache = new Map()
   const recovered = []
   const skipped = []
+  let checked = 0
 
   for (const { kind, record } of targets) {
+    if (Date.now() > deadline) break
+    checked += 1
     const settings = groups.get(`${record.channel_name}::${record.group_name}`) || fallback
     if (!settings) { skipped.push(record.id); continue }
     try {
@@ -231,7 +235,7 @@ async function recoverMissingImages(userId, days = 3) {
       skipped.push(record.id)
     }
   }
-  return { checked: targets.length, recovered: recovered.length, skipped: skipped.length, records: recovered }
+  return { checked, total: targets.length, recovered: recovered.length, skipped: skipped.length, partial: checked < targets.length, records: recovered }
 }
 
 app.post('/api/maintenance/recover-images', requireAuth, async (req, res) => {
