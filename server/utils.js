@@ -42,7 +42,8 @@ const terminalFailureStatuses = new Set(['failed', 'error', 'rejected', 'cancele
 const defaultPollBudgetMs = Number(process.env.POLL_BUDGET_MS || 900000)
 const uncertainPollBudgetMs = Number(process.env.POLL_UNCERTAIN_BUDGET_MS || 1200000)
 const pausedPollGraceMs = Number(process.env.POLL_PAUSED_GRACE_MS || 120000)
-const downloadTimeoutMs = Number(process.env.IMAGE_DOWNLOAD_TIMEOUT_MS || 300000)
+const downloadTimeoutMs = Number(process.env.IMAGE_DOWNLOAD_TIMEOUT_MS || 60000)
+const downloadAttemptMs = Number(process.env.IMAGE_DOWNLOAD_ATTEMPT_MS || 20000)
 
 export function pollBudgetMs({ baseMs, uncertainMs, sawUncertain }) {
   return sawUncertain ? uncertainMs : baseMs
@@ -116,15 +117,17 @@ export function resolveAssetUrl(url, baseUrl) {
   }
 }
 
-async function downloadImage(url, { apiKey, baseUrl, signed }) {
+async function downloadImage(url, { apiKey, baseUrl, signed, deadline }) {
   const target = resolveAssetUrl(url, baseUrl)
   const authAttempts = []
   if (!signed && apiKey && sameSite(target, baseUrl)) authAttempts.push({ Authorization: `Bearer ${apiKey}` })
   authAttempts.push(null)
   let lastError
   for (const headers of authAttempts) {
+    const remaining = (deadline || Date.now() + downloadAttemptMs) - Date.now()
+    if (remaining <= 1000) break
     try {
-      const response = await fetch(target, { headers: headers || {}, signal: AbortSignal.timeout(downloadTimeoutMs) })
+      const response = await fetch(target, { headers: headers || {}, signal: AbortSignal.timeout(Math.min(remaining, downloadAttemptMs)) })
       if (response.ok) return Buffer.from(await response.arrayBuffer())
       lastError = new Error(`下载图片失败: HTTP ${response.status}`)
       if (response.status === 401 || response.status === 403) continue
@@ -134,7 +137,7 @@ async function downloadImage(url, { apiKey, baseUrl, signed }) {
       lastError = error
     }
   }
-  throw lastError
+  throw lastError || new Error('下载图片超时')
 }
 
 function hostOf(value) {
@@ -172,9 +175,11 @@ export async function saveImage(item, format = 'png', options = {}) {
   const file = path.join(dir, name)
 
   let lastError
+  const deadline = Date.now() + downloadTimeoutMs
   for (const source of sources) {
+    if (Date.now() >= deadline) break
     try {
-      const buffer = await downloadImage(source.url, { apiKey: options.apiKey, baseUrl: options.baseUrl, signed: source.signed })
+      const buffer = await downloadImage(source.url, { apiKey: options.apiKey, baseUrl: options.baseUrl, signed: source.signed, deadline })
       await fs.writeFile(file, buffer)
       return `/uploads/${name}`
     } catch (error) {
