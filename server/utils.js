@@ -42,8 +42,7 @@ const terminalFailureStatuses = new Set(['failed', 'error', 'rejected', 'cancele
 const defaultPollBudgetMs = Number(process.env.POLL_BUDGET_MS || 900000)
 const uncertainPollBudgetMs = Number(process.env.POLL_UNCERTAIN_BUDGET_MS || 1200000)
 const pausedPollGraceMs = Number(process.env.POLL_PAUSED_GRACE_MS || 120000)
-const downloadTimeoutMs = Number(process.env.IMAGE_DOWNLOAD_TIMEOUT_MS || 60000)
-const downloadAttemptMs = Number(process.env.IMAGE_DOWNLOAD_ATTEMPT_MS || 20000)
+const downloadTimeoutMs = Number(process.env.IMAGE_DOWNLOAD_TIMEOUT_MS || 120000)
 
 export function pollBudgetMs({ baseMs, uncertainMs, sawUncertain }) {
   return sawUncertain ? uncertainMs : baseMs
@@ -117,29 +116,6 @@ export function resolveAssetUrl(url, baseUrl) {
   }
 }
 
-async function downloadImage(url, { apiKey, baseUrl, signed, deadline }) {
-  const target = resolveAssetUrl(url, baseUrl)
-  const authAttempts = []
-  if (!signed && apiKey && sameSite(target, baseUrl)) authAttempts.push({ Authorization: `Bearer ${apiKey}` })
-  authAttempts.push(null)
-  let lastError
-  for (const headers of authAttempts) {
-    const remaining = (deadline || Date.now() + downloadAttemptMs) - Date.now()
-    if (remaining <= 1000) break
-    try {
-      const response = await fetch(target, { headers: headers || {}, signal: AbortSignal.timeout(Math.min(remaining, downloadAttemptMs)) })
-      if (response.ok) return Buffer.from(await response.arrayBuffer())
-      lastError = new Error(`下载图片失败: HTTP ${response.status}`)
-      if (response.status === 401 || response.status === 403) continue
-      throw lastError
-    } catch (error) {
-      if (!isTransientNetworkError(error)) throw error
-      lastError = error
-    }
-  }
-  throw lastError || new Error('下载图片超时')
-}
-
 function hostOf(value) {
   try { return new URL(value).hostname } catch { return '' }
 }
@@ -161,6 +137,60 @@ export function extractUpstreamLinks(payload, baseUrl = '') {
     .filter(Boolean)
 }
 
+export function buildDownloadAttempts(sources, { apiKey = '', baseUrl = '' } = {}) {
+  const attempts = []
+  const seen = new Set()
+  for (const source of sources) {
+    if (source.type !== 'url' || !source.url) continue
+    const url = resolveAssetUrl(source.url, baseUrl)
+    const variants = []
+    if (!source.signed && apiKey && sameSite(url, baseUrl)) variants.push(true)
+    variants.push(false)
+    for (const withAuth of variants) {
+      const key = `${url}|${withAuth}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      attempts.push({ url, withAuth })
+    }
+  }
+  return attempts
+}
+
+async function downloadFastest(attempts, { apiKey, timeoutMs }) {
+  if (!attempts.length) throw new Error('没有可用的下载地址')
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(new Error('下载图片超时')), timeoutMs)
+  const errors = []
+  let settled = false
+  try {
+    return await new Promise((resolve, reject) => {
+      let pending = attempts.length
+      for (const attempt of attempts) {
+        const headers = attempt.withAuth ? { Authorization: `Bearer ${apiKey}` } : {}
+        fetch(attempt.url, { headers, signal: controller.signal })
+          .then(async (response) => {
+            if (!response.ok) throw new Error(`下载图片失败: HTTP ${response.status}`)
+            const buffer = Buffer.from(await response.arrayBuffer())
+            return buffer
+          })
+          .then((buffer) => {
+            if (settled) return
+            settled = true
+            controller.abort()
+            resolve(buffer)
+          })
+          .catch((error) => {
+            if (!settled) errors.push(error?.message || String(error))
+            pending -= 1
+            if (!settled && pending === 0) reject(new Error(errors.join(' | ') || '下载图片失败'))
+          })
+      }
+    })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 export async function saveImage(item, format = 'png', options = {}) {
   const now = Date.now()
   const sources = resolveImageSources(item).filter((source) => source.type === 'base64' || !isExpiredAt(source.expiresAt, now))
@@ -174,19 +204,10 @@ export async function saveImage(item, format = 'png', options = {}) {
   const name = `${Date.now()}-${Math.random().toString(16).slice(2)}.${safeFormat}`
   const file = path.join(dir, name)
 
-  let lastError
-  const deadline = Date.now() + downloadTimeoutMs
-  for (const source of sources) {
-    if (Date.now() >= deadline) break
-    try {
-      const buffer = await downloadImage(source.url, { apiKey: options.apiKey, baseUrl: options.baseUrl, signed: source.signed, deadline })
-      await fs.writeFile(file, buffer)
-      return `/uploads/${name}`
-    } catch (error) {
-      lastError = error
-    }
-  }
-  throw lastError || new Error('上游返回的图片数据格式未知')
+  const attempts = buildDownloadAttempts(sources, { apiKey: options.apiKey, baseUrl: options.baseUrl })
+  const buffer = await downloadFastest(attempts, { apiKey: options.apiKey, timeoutMs: downloadTimeoutMs })
+  await fs.writeFile(file, buffer)
+  return `/uploads/${name}`
 }
 
 function sleep(ms) {

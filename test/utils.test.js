@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { resolvePollUrl, extractImageItems, isCompletedImageTask, resolveImageSource, resolveImageSources, resolveAssetUrl, sameSite, upstreamStatusLabel, pollBudgetMs, evaluatePollState, formatWaitMs, isTransientNetworkError, extractTaskId, isExpiredAt, extractUpstreamLinks } from '../server/utils.js'
+import { resolvePollUrl, extractImageItems, isCompletedImageTask, resolveImageSource, resolveImageSources, resolveAssetUrl, sameSite, upstreamStatusLabel, pollBudgetMs, evaluatePollState, formatWaitMs, isTransientNetworkError, extractTaskId, isExpiredAt, extractUpstreamLinks, buildDownloadAttempts } from '../server/utils.js'
 
 test('resolvePollUrl resolves root-relative task URLs against the origin', () => {
   assert.equal(
@@ -68,6 +68,20 @@ test('isExpiredAt detects past and future timestamps', () => {
   assert.equal(isExpiredAt('', now), false)
   assert.equal(isExpiredAt(undefined, now), false)
   assert.equal(isExpiredAt('not-a-date', now), false)
+})
+
+test('buildDownloadAttempts races every source and auth variant once', () => {
+  const attempts = buildDownloadAttempts([
+    { type: 'url', url: 'https://media/a.png', signed: true },
+    { type: 'url', url: '/v1/images/tasks/t/assets/a.png', signed: false },
+    { type: 'url', url: 'https://media/a.png', signed: true }
+  ], { apiKey: 'sk-1', baseUrl: 'https://api.example.com/v1' })
+  assert.deepEqual(attempts, [
+    { url: 'https://media/a.png', withAuth: false },
+    { url: 'https://api.example.com/v1/images/tasks/t/assets/a.png', withAuth: true },
+    { url: 'https://api.example.com/v1/images/tasks/t/assets/a.png', withAuth: false }
+  ])
+  assert.deepEqual(buildDownloadAttempts([], { apiKey: 'sk-1', baseUrl: 'https://api.example.com/v1' }), [])
 })
 
 test('extractUpstreamLinks marks browser-openable links and keeps expiry', () => {
