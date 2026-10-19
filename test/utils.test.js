@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { resolvePollUrl, extractImageItems, isCompletedImageTask, resolveImageSource, resolveImageSources, resolveAssetUrl, sameSite, upstreamStatusLabel, pollBudgetMs, evaluatePollState, formatWaitMs, isTransientNetworkError, extractTaskId, isExpiredAt } from '../server/utils.js'
+import { resolvePollUrl, extractImageItems, isCompletedImageTask, resolveImageSource, resolveImageSources, resolveAssetUrl, sameSite, upstreamStatusLabel, pollBudgetMs, evaluatePollState, formatWaitMs, isTransientNetworkError, extractTaskId, isExpiredAt, extractUpstreamLinks } from '../server/utils.js'
 
 test('resolvePollUrl resolves root-relative task URLs against the origin', () => {
   assert.equal(
@@ -68,6 +68,20 @@ test('isExpiredAt detects past and future timestamps', () => {
   assert.equal(isExpiredAt('', now), false)
   assert.equal(isExpiredAt(undefined, now), false)
   assert.equal(isExpiredAt('not-a-date', now), false)
+})
+
+test('extractUpstreamLinks prefers signed urls and keeps expiry', () => {
+  const links = extractUpstreamLinks({
+    assets: [
+      { signed_url: 'https://media/x.png', signed_url_expires_at: '2026-10-15T00:00:00Z', url: '/v1/images/tasks/t1/assets/x.png', expires_at: '2026-10-16T00:00:00Z' },
+      { url: 'https://api/y.png', expires_at: '2026-10-16T00:00:00Z' },
+      { b64_json: 'abc' }
+    ]
+  })
+  assert.equal(links.length, 2)
+  assert.deepEqual(links[0], { url: 'https://media/x.png', signed: true, expires_at: '2026-10-15T00:00:00Z' })
+  assert.deepEqual(links[1], { url: 'https://api/y.png', signed: false, expires_at: '2026-10-16T00:00:00Z' })
+  assert.deepEqual(extractUpstreamLinks({}), [])
 })
 
 test('sameSite keeps api keys from leaking to other domains', () => {

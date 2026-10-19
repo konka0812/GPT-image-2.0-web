@@ -10,7 +10,7 @@ import { requireAuth, signToken } from './auth.js'
 import { completeJob, createJob, failJob, getJob, updateJob } from './jobs.js'
 import { buildReferencePayload, maxReferenceImageBytes, validateReferenceFiles } from './reference.js'
 import { findImageTarget, legacyChannels, normalizeChannels, publicChannels } from './settings.js'
-import { assertEnum, callImageApiWithRetry, extractImageItems, extractTaskId, formats, formatWaitMs, isExpiredAt, qualities, resolveImageSources, saveImage, upstreamStatusLabel } from './utils.js'
+import { assertEnum, callImageApiWithRetry, extractImageItems, extractTaskId, extractUpstreamLinks, formats, formatWaitMs, isExpiredAt, qualities, resolveImageSources, saveImage, upstreamStatusLabel } from './utils.js'
 import { cleanupOrphans, collectImageNames, findMatchingTask, imageStats, removeImages } from './maintenance.js'
 import { optimizePrompt } from './prompt-optimizer.js'
 
@@ -287,8 +287,12 @@ async function finishImageJob(job, settings, endpoint, payload, outputFormat, ma
       if (status.taskId) upstreamTaskId = status.taskId
       reportJobStatus(job, status)
     })
-    updateJob(job.id, { phase: 'saving', progressText: '上游处理完成，正在保存图片' })
-    await updateJobHistory(job, { phase: 'saving', progress_text: '上游处理完成，正在保存图片' }).catch(() => {})
+    const links = extractUpstreamLinks(result)
+    const savingText = links.some((link) => link.signed)
+      ? '上游已生成，正在下载保存（也可直接打开上游链接）'
+      : '上游已生成，正在下载保存'
+    updateJob(job.id, { phase: 'saving', progressText: savingText, upstreamLinks: links })
+    await updateJobHistory(job, { phase: 'saving', progress_text: savingText, upstream_links: JSON.stringify(links) }).catch(() => {})
     const images = []
     for (const item of extractImageItems(result).slice(0, maxImages)) images.push(await saveImage(item, outputFormat, { apiKey: settings.api_key, baseUrl: settings.base_url }))
     if (!images.length) throw new Error('上游未返回生成图片')

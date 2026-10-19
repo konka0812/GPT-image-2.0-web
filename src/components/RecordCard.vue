@@ -11,6 +11,10 @@
         </div>
         <p v-if="channelLabel" class="text-xs text-cyan-200/80">{{ channelLabel }}</p>
         <p v-if="imagesCleared" class="text-xs text-slate-500">图片已清理</p>
+        <p v-if="upstreamLink" class="text-xs">
+          <a :href="upstreamLink" target="_blank" rel="noopener" class="text-cyan-300 underline">上游图片链接</a>
+          <span class="ml-1 text-slate-500">（临时链接，约 6 小时内有效）</span>
+        </p>
         <p v-if="item.status === 'running'" class="text-xs text-cyan-200">{{ item.progress_text || '任务处理中' }}<span v-if="item.poll_count"> · 第 {{ item.poll_count }} 次查询</span></p>
         <p v-if="item.error" class="text-xs text-red-300">{{ readableError }}</p>
       </div>
@@ -27,7 +31,7 @@
 
 <script setup>
 import { computed } from 'vue'
-import { describeTaskError, formatElapsed } from '../task-feedback.js'
+import { describeTaskError, formatElapsed, upstreamImageLinks } from '../task-feedback.js'
 import { findSizeEntry, formatPixels, sizeFullLabel } from '../image-sizes.js'
 
 const props = defineProps({ item: { type: Object, required: true } })
@@ -55,6 +59,10 @@ const duration = computed(() => {
 const readableError = computed(() => describeTaskError(props.item.error))
 const channelLabel = computed(() => [props.item.channel_name, props.item.group_name, props.item.model_name].filter(Boolean).join(' · '))
 const imagesCleared = computed(() => !images.value.length && Boolean(props.item.images_cleared_at))
+const upstreamLink = computed(() => {
+  const link = upstreamImageLinks(props.item.upstream_links, { signedOnly: true })[0]
+  return link ? link.url : ''
+})
 const sizeText = computed(() => {
   const entry = findSizeEntry(props.item.size)
   return entry ? sizeFullLabel(entry) : formatPixels(props.item.size)

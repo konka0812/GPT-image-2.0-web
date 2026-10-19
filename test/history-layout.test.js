@@ -42,3 +42,12 @@ test('history cards mark cleaned images', async () => {
   assert.match(card, /images_cleared_at/)
   assert.match(card, /图片已清理/)
 })
+
+test('history cards expose the upstream image link while it is valid', async () => {
+  const card = await fs.readFile(new URL('../src/components/RecordCard.vue', import.meta.url), 'utf8')
+  const taskStatus = await fs.readFile(new URL('../src/components/TaskStatus.vue', import.meta.url), 'utf8')
+  assert.match(card, /upstream_links/)
+  assert.match(card, /上游图片链接/)
+  assert.match(taskStatus, /upstreamLinks/)
+  assert.match(taskStatus, /打开图片/)
+})

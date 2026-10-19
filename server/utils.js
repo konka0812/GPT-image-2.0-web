@@ -137,6 +137,20 @@ async function downloadImage(url, { apiKey, baseUrl, signed }) {
   throw lastError
 }
 
+export function extractUpstreamLinks(payload) {
+  return extractImageItems(payload)
+    .map((item) => {
+      const source = resolveImageSource(item)
+      if (!source || source.type === 'base64') return null
+      return {
+        url: source.url,
+        signed: Boolean(source.signed),
+        expires_at: (source.signed ? item.signed_url_expires_at : item.expires_at) || item.expires_at || ''
+      }
+    })
+    .filter(Boolean)
+}
+
 export async function saveImage(item, format = 'png', options = {}) {
   const now = Date.now()
   const sources = resolveImageSources(item).filter((source) => source.type === 'base64' || !isExpiredAt(source.expiresAt, now))

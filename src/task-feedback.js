@@ -26,3 +26,23 @@ export function taskStatusUrl(jobId) {
 export function taskStorageKey(kind) {
   return `active-image-task:${kind}`
 }
+
+export function isLinkExpired(value, now = Date.now()) {
+  if (!value) return false
+  const time = new Date(value).getTime()
+  return Number.isFinite(time) ? time <= now : false
+}
+
+export function upstreamImageLinks(raw, { signedOnly = false, now = Date.now() } = {}) {
+  let links = []
+  try {
+    links = JSON.parse(raw || '[]')
+  } catch {
+    return []
+  }
+  return (Array.isArray(links) ? links : []).filter((link) => {
+    if (!link?.url) return false
+    if (signedOnly && !link.signed) return false
+    return !isLinkExpired(link.expires_at, now)
+  })
+}
