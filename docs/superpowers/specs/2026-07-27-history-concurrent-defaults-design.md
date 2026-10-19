@@ -126,7 +126,7 @@ DELETE /api/history/:kind/:id
   - 提交任务后按钮立即恢复，可继续提交第二个任务。
   - 历史页删除单条后立即消失。
   - 点击刷新后出现“已刷新”提示并自动消失。
-  - 设置页默认说明仍为 `https://api.example.com/v1`。
+  - 设置页默认说明仍为 `https://<your-relay-domain>/v1`。
 
 ## 部署影响
 

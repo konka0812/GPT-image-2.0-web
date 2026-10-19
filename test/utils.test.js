@@ -101,7 +101,7 @@ test('extractUpstreamLinks marks browser-openable links and keeps expiry', () =>
 test('sameSite keeps api keys from leaking to other domains', () => {
   assert.equal(sameSite('https://media.example.com/a.png', 'https://api.example.com/v1'), true)
   assert.equal(sameSite('https://api.example.com/a.png', 'https://api.example.com/v1'), true)
-  assert.equal(sameSite('https://evil.example.com/a.png', 'https://api.example.com/v1'), false)
+  assert.equal(sameSite('https://evil.other-domain.net/a.png', 'https://api.example.com/v1'), false)
   assert.equal(sameSite('not-a-url', 'https://api.example.com/v1'), false)
 })
 
