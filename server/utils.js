@@ -137,16 +137,21 @@ async function downloadImage(url, { apiKey, baseUrl, signed }) {
   throw lastError
 }
 
+function hostOf(value) {
+  try { return new URL(value).hostname } catch { return '' }
+}
+
 export function extractUpstreamLinks(payload, baseUrl = '') {
+  const baseHost = hostOf(baseUrl)
   return extractImageItems(payload)
     .map((item) => {
       const source = resolveImageSource(item)
       if (!source || source.type === 'base64') return null
       const url = resolveAssetUrl(source.url, baseUrl)
-      const needsAuth = !source.signed && Boolean(baseUrl) && sameSite(url, baseUrl)
+      const direct = Boolean(source.signed) || !baseHost || hostOf(url) !== baseHost
       return {
         url,
-        direct: !needsAuth,
+        direct,
         expires_at: (source.signed ? item.signed_url_expires_at : item.expires_at) || item.expires_at || ''
       }
     })
