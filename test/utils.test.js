@@ -70,17 +70,17 @@ test('isExpiredAt detects past and future timestamps', () => {
   assert.equal(isExpiredAt('not-a-date', now), false)
 })
 
-test('extractUpstreamLinks prefers signed urls and keeps expiry', () => {
+test('extractUpstreamLinks marks browser-openable links and keeps expiry', () => {
   const links = extractUpstreamLinks({
     assets: [
-      { signed_url: 'https://media/x.png', signed_url_expires_at: '2026-10-15T00:00:00Z', url: '/v1/images/tasks/t1/assets/x.png', expires_at: '2026-10-16T00:00:00Z' },
-      { url: 'https://api/y.png', expires_at: '2026-10-16T00:00:00Z' },
+      { signed_url: 'https://media/x.png', signed_url_expires_at: '2026-10-15T00:00:00Z' },
+      { url: '/v1/images/tasks/t1/assets/x.png', expires_at: '2026-10-16T00:00:00Z' },
       { b64_json: 'abc' }
     ]
-  })
+  }, 'https://api.example.com/v1')
   assert.equal(links.length, 2)
-  assert.deepEqual(links[0], { url: 'https://media/x.png', signed: true, expires_at: '2026-10-15T00:00:00Z' })
-  assert.deepEqual(links[1], { url: 'https://api/y.png', signed: false, expires_at: '2026-10-16T00:00:00Z' })
+  assert.deepEqual(links[0], { url: 'https://media/x.png', direct: true, expires_at: '2026-10-15T00:00:00Z' })
+  assert.deepEqual(links[1], { url: 'https://api.example.com/v1/images/tasks/t1/assets/x.png', direct: false, expires_at: '2026-10-16T00:00:00Z' })
   assert.deepEqual(extractUpstreamLinks({}), [])
 })
 

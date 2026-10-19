@@ -29,5 +29,5 @@ import { upstreamImageLinks } from '../task-feedback.js'
 
 const props = defineProps({ job: { type: Object, required: true }, elapsed: { type: String, required: true }, queryCount: { type: Number, default: 0 }, title: { type: String, default: '任务处理中' } })
 const phaseText = computed(() => ({ queued: '等待处理', calling: '调用上游', accepted: '上游已接收', polling: '查询上游任务', retry: '等待重试', saving: '保存图片' })[props.job.phase] || props.job.phase)
-const signedLinks = computed(() => (props.job.upstreamLinks || []).filter((link) => link?.signed && link.url))
+const signedLinks = computed(() => (props.job.upstreamLinks || []).filter((link) => link?.direct && link.url))
 </script>

@@ -33,7 +33,7 @@ export function isLinkExpired(value, now = Date.now()) {
   return Number.isFinite(time) ? time <= now : false
 }
 
-export function upstreamImageLinks(raw, { signedOnly = false, now = Date.now() } = {}) {
+export function upstreamImageLinks(raw, { directOnly = false, now = Date.now() } = {}) {
   let links = []
   try {
     links = JSON.parse(raw || '[]')
@@ -42,7 +42,7 @@ export function upstreamImageLinks(raw, { signedOnly = false, now = Date.now() }
   }
   return (Array.isArray(links) ? links : []).filter((link) => {
     if (!link?.url) return false
-    if (signedOnly && !link.signed) return false
+    if (directOnly && !link.direct) return false
     return !isLinkExpired(link.expires_at, now)
   })
 }

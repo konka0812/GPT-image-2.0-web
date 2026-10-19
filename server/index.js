@@ -287,15 +287,37 @@ async function finishImageJob(job, settings, endpoint, payload, outputFormat, ma
       if (status.taskId) upstreamTaskId = status.taskId
       reportJobStatus(job, status)
     })
-    const links = extractUpstreamLinks(result)
-    const savingText = links.some((link) => link.signed)
+    const items = extractImageItems(result)
+    if (!items.length) throw new Error('上游未返回生成图片')
+    const links = extractUpstreamLinks(result, settings.base_url)
+    const savingText = links.some((link) => link.direct)
       ? '上游已生成，正在下载保存（也可直接打开上游链接）'
       : '上游已生成，正在下载保存'
     updateJob(job.id, { phase: 'saving', progressText: savingText, upstreamLinks: links })
     await updateJobHistory(job, { phase: 'saving', progress_text: savingText, upstream_links: JSON.stringify(links) }).catch(() => {})
+
     const images = []
-    for (const item of extractImageItems(result).slice(0, maxImages)) images.push(await saveImage(item, outputFormat, { apiKey: settings.api_key, baseUrl: settings.base_url }))
-    if (!images.length) throw new Error('上游未返回生成图片')
+    let saveError
+    for (const item of items.slice(0, maxImages)) {
+      try {
+        images.push(await saveImage(item, outputFormat, { apiKey: settings.api_key, baseUrl: settings.base_url }))
+      } catch (error) {
+        saveError = error
+      }
+    }
+    if (!images.length) {
+      completeJob(job.id, [])
+      await updateJobHistory(job, {
+        status: 'success',
+        phase: 'success',
+        progress_text: `上游已生成，本地保存失败（${saveError?.message || '未知原因'}），可用上游链接打开`,
+        error: '',
+        completed_at: new Date().toISOString(),
+        upstream_task_id: upstreamTaskId,
+        upstream_links: JSON.stringify(links)
+      }).catch(() => {})
+      return
+    }
     completeJob(job.id, images)
     await updateJobHistory(job, { image_path: JSON.stringify(images), status: 'success', phase: 'success', progress_text: '处理成功', completed_at: new Date().toISOString(), upstream_task_id: upstreamTaskId }).catch(() => {})
   } catch (error) {

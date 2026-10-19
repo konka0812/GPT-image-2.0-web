@@ -137,14 +137,16 @@ async function downloadImage(url, { apiKey, baseUrl, signed }) {
   throw lastError
 }
 
-export function extractUpstreamLinks(payload) {
+export function extractUpstreamLinks(payload, baseUrl = '') {
   return extractImageItems(payload)
     .map((item) => {
       const source = resolveImageSource(item)
       if (!source || source.type === 'base64') return null
+      const url = resolveAssetUrl(source.url, baseUrl)
+      const needsAuth = !source.signed && Boolean(baseUrl) && sameSite(url, baseUrl)
       return {
-        url: source.url,
-        signed: Boolean(source.signed),
+        url,
+        direct: !needsAuth,
         expires_at: (source.signed ? item.signed_url_expires_at : item.expires_at) || item.expires_at || ''
       }
     })

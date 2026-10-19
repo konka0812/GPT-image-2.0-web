@@ -17,16 +17,16 @@ test('task feedback translates common provider errors', () => {
   assert.match(describeTaskError('上游任务已取消'), /已被取消/)
 })
 
-test('upstreamImageLinks filters expired and unsigned links', () => {
+test('upstreamImageLinks filters expired and non-direct links', () => {
   const now = new Date('2026-10-14T12:00:00Z').getTime()
   const raw = JSON.stringify([
-    { url: 'https://media/a.png', signed: true, expires_at: '2026-10-14T18:00:00Z' },
-    { url: 'https://media/b.png', signed: true, expires_at: '2026-10-14T10:00:00Z' },
-    { url: 'https://api/c.png', signed: false, expires_at: '2026-10-14T18:00:00Z' }
+    { url: 'https://media/a.png', direct: true, expires_at: '2026-10-14T18:00:00Z' },
+    { url: 'https://media/b.png', direct: true, expires_at: '2026-10-14T10:00:00Z' },
+    { url: 'https://api/c.png', direct: false, expires_at: '2026-10-14T18:00:00Z' }
   ])
   assert.equal(upstreamImageLinks(raw, { now }).length, 2)
-  assert.equal(upstreamImageLinks(raw, { signedOnly: true, now }).length, 1)
-  assert.equal(upstreamImageLinks(raw, { signedOnly: true, now })[0].url, 'https://media/a.png')
+  assert.equal(upstreamImageLinks(raw, { directOnly: true, now }).length, 1)
+  assert.equal(upstreamImageLinks(raw, { directOnly: true, now })[0].url, 'https://media/a.png')
   assert.deepEqual(upstreamImageLinks('not-json'), [])
   assert.deepEqual(upstreamImageLinks(''), [])
 })
