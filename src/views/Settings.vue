@@ -57,7 +57,7 @@
       </section>
       <section class="border-t border-white/10 pt-6">
         <h2 class="text-lg font-bold text-slate-200">维护</h2>
-        <p class="mt-1 text-xs text-slate-500">删除历史记录时会同时删除对应图片；如仍有残留，可在这里清理没有被任何记录引用的图片</p>
+        <p class="mt-1 text-xs text-slate-500">删除历史记录时会同时删除对应图片；如仍有残留，可清理未被引用的图片。上游图片链接约 6-8 小时过期，失败后请尽快追回</p>
         <div class="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4">
           <p v-if="stats" class="text-sm leading-6 text-slate-300">
             图片文件：{{ stats.totalFiles }} 个 · 占用 {{ formatBytes(stats.totalBytes) }}<br />
@@ -223,7 +223,8 @@ async function recoverImages() {
     await load()
     await loadStats()
     const more = data.partial ? '\n（本轮时间到，可再点一次继续）' : ''
-    showDialog('追回完成', `已检查 ${data.checked} / ${data.total} 条失败记录\n成功追回 ${data.recovered} 条\n未匹配 ${data.skipped} 条${more}`)
+    const expired = data.expired ? `\n其中 ${data.expired} 条已超过上游有效期（约 6-8 小时）` : ''
+    showDialog('追回完成', `已检查 ${data.checked} / ${data.total} 条失败记录\n成功追回 ${data.recovered} 条\n未匹配 ${data.skipped} 条${expired}${more}`)
   } catch (e) {
     showDialog('追回失败', e.response?.data?.error || e.message)
   } finally {

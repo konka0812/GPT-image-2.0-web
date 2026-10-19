@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { resolvePollUrl, extractImageItems, isCompletedImageTask, resolveImageSource, resolveImageSources, resolveAssetUrl, sameSite, upstreamStatusLabel, pollBudgetMs, evaluatePollState, formatWaitMs, isTransientNetworkError, extractTaskId } from '../server/utils.js'
+import { resolvePollUrl, extractImageItems, isCompletedImageTask, resolveImageSource, resolveImageSources, resolveAssetUrl, sameSite, upstreamStatusLabel, pollBudgetMs, evaluatePollState, formatWaitMs, isTransientNetworkError, extractTaskId, isExpiredAt } from '../server/utils.js'
 
 test('resolvePollUrl resolves root-relative task URLs against the origin', () => {
   assert.equal(
@@ -46,13 +46,28 @@ test('resolveImageSource prefers base64, then signed urls, then plain urls', () 
 test('resolveImageSources lists every download candidate in priority order', () => {
   assert.deepEqual(resolveImageSources({ b64_json: 'a', signed_url: 'https://s', url: 'https://u', download_url: 'https://d' }), [
     { type: 'base64', data: 'a' },
-    { type: 'url', url: 'https://s', signed: true },
-    { type: 'url', url: 'https://u', signed: false },
-    { type: 'url', url: 'https://d', signed: false }
+    { type: 'url', url: 'https://s', signed: true, expiresAt: undefined },
+    { type: 'url', url: 'https://u', signed: false, expiresAt: undefined },
+    { type: 'url', url: 'https://d', signed: false, expiresAt: undefined }
   ])
-  assert.deepEqual(resolveImageSources({ url: 'https://u' }), [{ type: 'url', url: 'https://u', signed: false }])
+  assert.deepEqual(resolveImageSources({ url: 'https://u' }), [{ type: 'url', url: 'https://u', signed: false, expiresAt: undefined }])
   assert.deepEqual(resolveImageSources({}), [])
   assert.deepEqual(resolveImageSources(null), [])
+})
+
+test('resolveImageSources carries upstream expiry timestamps', () => {
+  const sources = resolveImageSources({ signed_url: 'https://s', signed_url_expires_at: '2026-10-15T00:00:00Z', url: 'https://u', expires_at: '2026-10-16T00:00:00Z' })
+  assert.equal(sources[0].expiresAt, '2026-10-15T00:00:00Z')
+  assert.equal(sources[1].expiresAt, '2026-10-16T00:00:00Z')
+})
+
+test('isExpiredAt detects past and future timestamps', () => {
+  const now = new Date('2026-10-14T12:00:00Z').getTime()
+  assert.equal(isExpiredAt('2026-10-14T11:00:00Z', now), true)
+  assert.equal(isExpiredAt('2026-10-14T13:00:00Z', now), false)
+  assert.equal(isExpiredAt('', now), false)
+  assert.equal(isExpiredAt(undefined, now), false)
+  assert.equal(isExpiredAt('not-a-date', now), false)
 })
 
 test('sameSite keeps api keys from leaking to other domains', () => {

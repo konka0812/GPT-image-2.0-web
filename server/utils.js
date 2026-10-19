@@ -82,13 +82,19 @@ export function resolveImageSource(item) {
   return null
 }
 
+export function isExpiredAt(value, now = Date.now()) {
+  if (!value) return false
+  const time = new Date(value).getTime()
+  return Number.isFinite(time) ? time <= now : false
+}
+
 export function resolveImageSources(item) {
   if (!item || typeof item !== 'object') return []
   const sources = []
   if (item.b64_json) sources.push({ type: 'base64', data: item.b64_json })
-  if (item.signed_url) sources.push({ type: 'url', url: item.signed_url, signed: true })
-  if (item.url) sources.push({ type: 'url', url: item.url, signed: false })
-  if (item.download_url) sources.push({ type: 'url', url: item.download_url, signed: false })
+  if (item.signed_url) sources.push({ type: 'url', url: item.signed_url, signed: true, expiresAt: item.signed_url_expires_at || item.expires_at })
+  if (item.url) sources.push({ type: 'url', url: item.url, signed: false, expiresAt: item.expires_at })
+  if (item.download_url) sources.push({ type: 'url', url: item.download_url, signed: false, expiresAt: item.expires_at })
   return sources
 }
 
@@ -132,8 +138,9 @@ async function downloadImage(url, { apiKey, baseUrl, signed }) {
 }
 
 export async function saveImage(item, format = 'png', options = {}) {
-  const sources = resolveImageSources(item)
-  if (!sources.length) throw new Error('上游返回的图片数据格式未知')
+  const now = Date.now()
+  const sources = resolveImageSources(item).filter((source) => source.type === 'base64' || !isExpiredAt(source.expiresAt, now))
+  if (!sources.length) throw new Error('上游图片链接已过期（有效期约 6-8 小时），无法下载')
   const inline = sources.find((source) => source.type === 'base64')
   if (inline) return saveBase64Image(inline.data, format)
 

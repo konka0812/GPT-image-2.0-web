@@ -10,7 +10,7 @@ import { requireAuth, signToken } from './auth.js'
 import { completeJob, createJob, failJob, getJob, updateJob } from './jobs.js'
 import { buildReferencePayload, maxReferenceImageBytes, validateReferenceFiles } from './reference.js'
 import { findImageTarget, legacyChannels, normalizeChannels, publicChannels } from './settings.js'
-import { assertEnum, callImageApiWithRetry, extractImageItems, extractTaskId, formats, formatWaitMs, qualities, saveImage, upstreamStatusLabel } from './utils.js'
+import { assertEnum, callImageApiWithRetry, extractImageItems, extractTaskId, formats, formatWaitMs, isExpiredAt, qualities, resolveImageSources, saveImage, upstreamStatusLabel } from './utils.js'
 import { cleanupOrphans, collectImageNames, findMatchingTask, imageStats, removeImages } from './maintenance.js'
 import { optimizePrompt } from './prompt-optimizer.js'
 
@@ -201,6 +201,7 @@ async function recoverMissingImages(userId, days = 3) {
   const taskCache = new Map()
   const recovered = []
   const skipped = []
+  let expired = 0
   let checked = 0
 
   for (const { kind, record } of targets) {
@@ -215,8 +216,11 @@ async function recoverMissingImages(userId, days = 3) {
       if (!task) { skipped.push(record.id); continue }
       const items = extractImageItems(task)
       if (!items.length) { skipped.push(record.id); continue }
+      const now = Date.now()
+      const usable = items.filter((item) => resolveImageSources(item).some((source) => source.type === 'base64' || !isExpiredAt(source.expiresAt, now)))
+      if (!usable.length) { expired += 1; skipped.push(record.id); continue }
       const images = []
-      for (const item of items.slice(0, 4)) images.push(await saveImage(item, record.output_format || 'png', { apiKey: settings.api_key, baseUrl: settings.base_url }))
+      for (const item of usable.slice(0, 4)) images.push(await saveImage(item, record.output_format || 'png', { apiKey: settings.api_key, baseUrl: settings.base_url }))
       if (!images.length) { skipped.push(record.id); continue }
       await withDb((data) => {
         const target = historyRecord(data, kind, record.id)
@@ -235,7 +239,7 @@ async function recoverMissingImages(userId, days = 3) {
       skipped.push(record.id)
     }
   }
-  return { checked, total: targets.length, recovered: recovered.length, skipped: skipped.length, partial: checked < targets.length, records: recovered }
+  return { checked, total: targets.length, recovered: recovered.length, skipped: skipped.length, expired, partial: checked < targets.length, records: recovered }
 }
 
 app.post('/api/maintenance/recover-images', requireAuth, async (req, res) => {
